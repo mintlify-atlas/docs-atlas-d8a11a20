@@ -1,0 +1,195 @@
+---
+title: "Scan targets"
+description: "Scan container images, filesystems, SBOMs, and direct package identifiers with Grype."
+keywords: ["grype", "scan", "container image", "docker", "podman", "oci", "sbom", "purl", "cpe", "registry"]
+---
+
+Grype accepts many input types. You can scan container images from a running daemon, tarballs on disk, OCI directories, local filesystems, SBOM files, and direct package identifiers.
+
+## Container images
+
+<Tabs>
+  <Tab title="Images">
+
+Scan an image using the default image source (Docker daemon, then registry fallback):
+
+```bash
+grype nginx:latest
+```
+
+Explicitly use the Docker daemon:
+
+```bash
+grype docker:nginx:latest
+```
+
+Explicitly use the Podman daemon:
+
+```bash
+grype podman:nginx:latest
+```
+
+Pull directly from a registry without a running container daemon:
+
+```bash
+grype registry:nginx:latest
+```
+
+<Note>
+  `registry:` pulls the image directly from the registry without requiring Docker or Podman to be running. This is useful in CI environments where no container runtime is available.
+</Note>
+
+**Multi-architecture images**
+
+Use `--platform` to specify the target architecture when an image has multiple variants:
+
+```bash
+grype nginx:latest --platform linux/arm64
+grype nginx:latest --platform linux/amd64
+```
+
+The platform format is `os/arch` or `os/arch/variant`, for example `linux/arm64/v8`.
+
+  </Tab>
+  <Tab title="Archives">
+
+Scan a Docker archive created with `docker save`:
+
+```bash
+grype docker-archive:path/to/image.tar
+```
+
+Scan an OCI archive (produced by Podman, Skopeo, or similar tools):
+
+```bash
+grype oci-archive:path/to/image.tar
+```
+
+Scan an OCI layout directory (produced by `skopeo copy --dest-creds ...` or similar):
+
+```bash
+grype oci-dir:path/to/oci-layout/
+```
+
+Scan a Singularity Image Format (SIF) container:
+
+```bash
+grype singularity:path/to/container.sif
+```
+
+  </Tab>
+  <Tab title="Filesystems">
+
+Scan any local directory as a filesystem:
+
+```bash
+grype dir:path/to/project/
+```
+
+Scan a single file:
+
+```bash
+grype file:path/to/binary
+```
+
+<Tip>
+  Use `dir:` to scan a checked-out repository or unpacked container layer. Grype catalogues packages found anywhere in the directory tree.
+</Tip>
+
+  </Tab>
+</Tabs>
+
+## SBOMs
+
+Scan a pre-generated SBOM file:
+
+```bash
+grype sbom:path/to/sbom.json
+```
+
+Pipe an SBOM directly into Grype:
+
+```bash
+syft alpine:latest -o json | grype
+```
+
+Grype accepts SBOMs in Syft JSON, CycloneDX (XML and JSON), and SPDX formats. See [SBOM scanning](/scanning/sbom-scanning) for details.
+
+## Direct package identifiers
+
+<Tabs>
+  <Tab title="PURL">
+
+Scan a file containing one Package URL (PURL) per line:
+
+```bash
+grype purl:path/to/purls.txt
+```
+
+Scan a single PURL directly on the command line:
+
+```bash
+grype 'pkg:apk/openssl@3.2.1?distro=alpine-3.20.3'
+```
+
+PURLs with a `distro` qualifier allow Grype to match OS-level vulnerability data accurately.
+
+  </Tab>
+  <Tab title="CPE">
+
+Scan a file containing one Common Platform Enumeration (CPE) per line:
+
+```bash
+grype cpes:path/to/cpes.txt
+```
+
+Scan a single CPE directly on the command line:
+
+```bash
+grype 'cpe:2.3:a:openssl:openssl:3.0.14:*:*:*:*:*:*:*'
+```
+
+  </Tab>
+</Tabs>
+
+## Scan options
+
+### Layer scope
+
+By default Grype scans the squashed (final) filesystem of an image. Use `--scope` (`-s`) to change this:
+
+<ParamField path="--scope" type="string" default="squashed">
+  Which layers to analyse. Options: `squashed` (default) or `all-layers`.
+</ParamField>
+
+```bash
+# Scan only the final squashed layer (default)
+grype nginx:latest --scope squashed
+
+# Scan every layer, including those overwritten by later layers
+grype nginx:latest --scope all-layers
+```
+
+<Warning>
+  `all-layers` can surface vulnerabilities in packages that were removed in a later layer. These packages are not present at runtime, so treat these findings with care.
+</Warning>
+
+### Excluding paths
+
+Use `--exclude` with a glob pattern to skip paths during cataloguing. You can pass the flag multiple times:
+
+```bash
+grype dir:. --exclude './vendor/**' --exclude './test/**'
+```
+
+Glob patterns follow standard Unix glob syntax. You can also set exclusions in the [configuration file](/configuration/overview).
+
+### Default image pull source
+
+When you provide a bare image name (no scheme), Grype tries the Docker daemon first, then falls back to the registry. Override the default with `--from`:
+
+```bash
+grype nginx:latest --from registry
+grype nginx:latest --from docker
+grype nginx:latest --from podman
+```

@@ -1,0 +1,255 @@
+---
+title: "Custom output templates"
+description: "Use Go templates to produce any output format from Grype scan results, from CSV to HTML to custom JSON."
+---
+
+Grype's `template` output format lets you render scan results into any text format using [Go's `text/template`](https://pkg.go.dev/text/template) syntax. All templates in the [grype/templates](https://github.com/anchore/grype/tree/main/templates) directory are examples you can use directly or adapt.
+
+## Basic usage
+
+```bash
+grype myimage:latest --output template --template /path/to/your/template.tmpl
+```
+
+The `-t` shorthand is equivalent to `--template`:
+
+```bash
+grype myimage:latest -o template -t ./templates/csv.tmpl
+```
+
+## Data model
+
+Your template receives a `Document` struct as its root context (`.`). The key fields are:
+
+### `.Matches`
+
+A list of vulnerability matches. Each match has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `.Vulnerability.ID` | string | CVE or vulnerability ID (e.g. `CVE-2023-1234`) |
+| `.Vulnerability.Severity` | string | `Critical`, `High`, `Medium`, `Low`, `Negligible`, or `Unknown` |
+| `.Vulnerability.Description` | string | Vulnerability description |
+| `.Vulnerability.DataSource` | string | URL to the advisory |
+| `.Vulnerability.URLs` | []string | Additional reference URLs |
+| `.Vulnerability.Fix.State` | string | `fixed`, `not-fixed`, `wont-fix`, or `unknown` |
+| `.Vulnerability.Fix.Versions` | []string | Version(s) containing the fix |
+| `.Vulnerability.Cvss` | []Cvss | CVSS score objects |
+| `.Vulnerability.EPSS` | []EPSS | EPSS score objects |
+| `.Vulnerability.KnownExploited` | []KnownExploited | KEV catalog entries |
+| `.Artifact.Name` | string | Package name |
+| `.Artifact.Version` | string | Installed version |
+| `.Artifact.Type` | string | Package type (e.g. `deb`, `rpm`, `npm`) |
+| `.Artifact.Locations` | []Location | File paths where the package was found |
+| `.Artifact.CPEs` | []string | CPE identifiers |
+| `.Artifact.PURL` | string | Package URL |
+| `.MatchDetails` | []MatchDetails | How the match was found |
+
+### `.IgnoredMatches`
+
+Same structure as `.Matches`, but for vulnerabilities suppressed by ignore rules. Each entry also has `.AppliedIgnoreRules` describing why it was ignored.
+
+### `.Source`
+
+Information about what was scanned:
+
+| Field | Description |
+|-------|-------------|
+| `.Source.Type` | `image`, `directory`, `file`, or `sbom-file` |
+| `.Source.Target` | Source-specific target info (image reference, path, etc.) |
+
+### `.Distro`
+
+The detected OS distribution:
+
+| Field | Description |
+|-------|-------------|
+| `.Distro.Name` | Distro name (e.g. `debian`, `alpine`) |
+| `.Distro.Version` | Distro version string |
+
+### `.Descriptor`
+
+Tool metadata:
+
+| Field | Description |
+|-------|-------------|
+| `.Descriptor.Name` | Tool name (`grype`) |
+| `.Descriptor.Version` | Grype version |
+| `.Descriptor.Timestamp` | Scan timestamp (ISO 8601) |
+
+## Template functions
+
+In addition to Go's built-in template functions, Grype provides the full [Sprig](https://masterminds.github.io/sprig/) function library plus two custom helpers:
+
+| Function | Description |
+|----------|-------------|
+| `getLastIndex <slice>` | Returns the last index of a slice (useful for comma-separated output) |
+| `byMatchName <matches>` | Sorts a match list by package name |
+
+Sprig highlights useful for templates: `toJson`, `upper`, `lower`, `trim`, `default`, `add`, `len`, `list`, `append`, `range`.
+
+## Built-in example templates
+
+The following templates ship with Grype in the [`templates/`](https://github.com/anchore/grype/tree/main/templates) directory.
+
+### csv.tmpl
+
+Produces a CSV file with one vulnerability per row.
+
+```
+"Package","Version Installed","Vulnerability ID","Severity"
+{{- range .Matches}}
+"{{.Artifact.Name}}","{{.Artifact.Version}}","{{.Vulnerability.ID}}","{{.Vulnerability.Severity}}"
+{{- end}}
+```
+
+```bash
+grype myimage:latest -o template -t templates/csv.tmpl > results.csv
+```
+
+### markdown.tmpl
+
+Produces a Markdown report with a summary table.
+
+```
+# Vulnerability Report
+
+- Name: {{- if eq (.Source.Type) "image" }} {{ .Source.Target.UserInput }}
+{{ else if eq (.Source.Type) "directory" }} {{ .Source.Target }}
+{{ else if eq (.Source.Type) "file" }} {{ .Source.Target }}
+{{ else if eq (.Source.Type) "sbom-file" }} {{ .Source.Target }}
+{{ else }} unknown
+{{ end -}}
+- Type: {{ .Source.Type }}
+- Date: {{ .Descriptor.Timestamp }}
+
+| Package | Version Installed | Vulnerability ID | Severity |
+|---------|-------------------|------------------|----------|
+{{- range .Matches }}
+| {{ .Artifact.Name }} | {{ .Artifact.Version }} | {{ .Vulnerability.ID }} | {{ .Vulnerability.Severity }} |
+{{- end }}
+```
+
+```bash
+grype myimage:latest -o template -t templates/markdown.tmpl > report.md
+```
+
+### junit.tmpl
+
+Produces JUnit XML output. Each vulnerability becomes a test failure, making it easy to integrate with CI test reporting dashboards.
+
+```xml
+<?xml version="1.0" ?>
+<testsuites name="grype-junit">
+{{- $failures := len $.Matches }}
+    <testsuite tests="{{ $failures }}" failures="{{ $failures }}" name="{{ $.Distro.Name }}:{{ $.Distro.Version }}" errors="0" skipped="0">
+        <properties>
+            <property name="type" value="{{ $.Distro.Name }}"></property>
+        </properties>
+        {{- range .Matches }}
+        <testcase classname="{{ .Artifact.Name }}-{{ .Artifact.Version }} ({{ .Artifact.Type }})" name="[{{ .Vulnerability.Severity }}] {{ .Vulnerability.ID }}">
+            <failure message="{{ .Artifact.Name }}: {{ .Vulnerability.ID }}" type="description">
+<![CDATA[
+{{ html .Vulnerability.Description }}
+
+CPEs:
+{{- range .Artifact.CPEs }}
+{{ . }}
+{{- end }}
+
+DataSource:
+{{ html .Vulnerability.DataSource }}
+
+]]></failure>
+        </testcase>
+        {{- end }}
+    </testsuite>
+</testsuites>
+```
+
+```bash
+grype myimage:latest -o template -t templates/junit.tmpl > results.xml
+```
+
+### html.tmpl
+
+Produces a self-contained HTML report with an interactive table (DataTables.js), severity counts, export to PDF/Excel, and dark mode support. The template includes a severity filter you can modify:
+
+```
+{{- if or (eq $vuln.Vulnerability.Severity "Critical") (eq $vuln.Vulnerability.Severity "High") (eq $vuln.Vulnerability.Severity "Medium") (eq $vuln.Vulnerability.Severity "Low") (eq $vuln.Vulnerability.Severity "Unknown") }}
+```
+
+To limit the report to critical and high only, change the filter condition:
+
+```
+{{- if or (eq $vuln.Vulnerability.Severity "Critical") (eq $vuln.Vulnerability.Severity "High") }}
+```
+
+```bash
+grype myimage:latest -o template -t templates/html.tmpl > report.html
+```
+
+## Writing a custom template
+
+<Steps>
+  <Step title="Create a template file">
+    Create a `.tmpl` file. This example produces a compact plaintext summary:
+
+    ```
+    Scan: {{ if eq .Source.Type "image" }}{{ .Source.Target.UserInput }}{{ else }}{{ .Source.Target }}{{ end }}
+    Date: {{ .Descriptor.Timestamp }}
+    Total matches: {{ len .Matches }}
+
+    {{ range .Matches -}}
+    [{{ .Vulnerability.Severity | upper }}] {{ .Vulnerability.ID }} — {{ .Artifact.Name }}@{{ .Artifact.Version }}
+    {{ end }}
+    ```
+  </Step>
+  <Step title="Run with your template">
+    ```bash
+    grype myimage:latest -o template -t ./my-template.tmpl
+    ```
+  </Step>
+  <Step title="Iterate and refine">
+    Use `--output json` alongside your template to compare the raw data model with your rendered output while you develop the template.
+
+    ```bash
+    grype myimage:latest -o json -o template -t ./my-template.tmpl \
+      --file /dev/null  # discard JSON, print template to stdout
+    ```
+  </Step>
+</Steps>
+
+## Filtering in templates
+
+Use `if` conditions to include only certain severities:
+
+```
+{{- range .Matches }}
+{{- if or (eq .Vulnerability.Severity "Critical") (eq .Vulnerability.Severity "High") }}
+{{ .Vulnerability.ID }}: {{ .Artifact.Name }} {{ .Artifact.Version }}
+{{- end }}
+{{- end }}
+```
+
+Check fix state to list only fixable vulnerabilities:
+
+```
+{{- range .Matches }}
+{{- if eq .Vulnerability.Fix.State "fixed" }}
+{{ .Vulnerability.ID }} — fix available: {{ index .Vulnerability.Fix.Versions 0 }}
+{{- end }}
+{{- end }}
+```
+
+## Pretty-printing JSON output
+
+When using the `json` output format, add `--pretty` to indent the JSON:
+
+```bash
+grype myimage:latest --output json --pretty
+```
+
+<Note>
+`--pretty` only applies to the `json` output format, not to templates.
+</Note>

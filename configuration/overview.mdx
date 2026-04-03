@@ -1,0 +1,270 @@
+---
+title: "Configuration"
+description: "Configure Grype using a YAML config file, environment variables, or CLI flags."
+---
+
+Grype reads configuration from a YAML file, environment variables, and CLI flags. CLI flags take the highest precedence, followed by environment variables, then the config file.
+
+## Config file locations
+
+Grype looks for a config file in the following locations, in order of precedence:
+
+1. `.grype.yaml` in the current working directory
+2. `$XDG_CONFIG_HOME/grype/config.yaml` (typically `~/.config/grype/config.yaml` on Linux)
+3. `~/.grype.yaml` in your home directory
+
+You can also explicitly point to a config file with the `-c` flag:
+
+```bash
+grype -c /path/to/grype.yaml alpine:latest
+```
+
+## Environment variables
+
+Every config option can also be set via an environment variable. Prefix the option name with `GRYPE_` and replace hyphens and dots with underscores.
+
+```bash
+# Equivalent to: fail-on-severity: high
+GRYPE_FAIL_ON_SEVERITY=high grype alpine:latest
+
+# Equivalent to: output: json
+GRYPE_OUTPUT=json grype alpine:latest
+
+# Equivalent to: db.auto-update: false
+GRYPE_DB_AUTO_UPDATE=false grype alpine:latest
+```
+
+## Full configuration reference
+
+The example below shows all major configuration options with their defaults and descriptions.
+
+```yaml
+# Output format for the vulnerability report.
+# Options: table, json, cyclonedx, sarif, template
+# Equivalent to: -o / --output
+output: table
+
+# Write the report to a file instead of stdout.
+# Equivalent to: --file
+file: ""
+
+# Pretty-print JSON and other structured output.
+pretty: false
+
+# Specify the target distro when Grype cannot detect it automatically.
+# Format: <distro>[-:@]<version>  (e.g. ubuntu:22.04, alpine:3.18)
+# Equivalent to: --distro
+distro: ""
+
+# Override the scanning name displayed in output.
+name: ""
+
+# Generate CPEs for packages that do not have CPE data.
+# Useful when scanning third-party SBOMs that may lack CPEs.
+# Equivalent to: --add-cpes-if-none
+add-cpes-if-none: false
+
+# Path to a Go template file (requires output: template).
+output-template-file: ""
+
+# Check for a newer version of Grype on startup.
+check-for-app-update: true
+
+# Exit with code 2 if any vulnerability at or above this severity is found.
+# Options: negligible, low, medium, high, critical
+# Equivalent to: -f / --fail-on
+fail-on-severity: ""
+
+# Only report vulnerabilities that have a known fix.
+# Equivalent to: --only-fixed
+only-fixed: false
+
+# Only report vulnerabilities that do not yet have a fix.
+# Equivalent to: --only-notfixed
+only-notfixed: false
+
+# Ignore vulnerabilities with specific fix states (comma-separated).
+# Options: fixed, not-fixed, wont-fix, unknown
+ignore-states: ""
+
+# Orient results by CVE ID instead of the original advisory ID.
+# Equivalent to: --by-cve
+by-cve: false
+
+# Show suppressed/ignored matches in the output (table format only).
+# Equivalent to: --show-suppressed
+show-suppressed: false
+
+# Sort results by a given strategy.
+# Options: risk, severity, epss, kev, package, vulnerability
+sort-by: risk
+
+# Add a timestamp to the report.
+timestamp: true
+
+# Platform override for container image sources.
+# Example: linux/arm64
+platform: ""
+
+# Default source to use when pulling container images.
+# Options: registry, docker, podman
+default-image-pull-source: ""
+
+# Glob patterns for paths to exclude from scanning.
+# Equivalent to: --exclude
+exclude:
+  - "/etc/**"
+  - "./out/**/*.json"
+
+# VEX documents to apply when producing scan results.
+# Equivalent to: --vex
+vex-documents: []
+
+# VEX statuses to treat as ignore rules.
+# Options: not_affected, fixed, affected, under_investigation
+vex-add: []
+
+# When true, matches on kernel-header packages are shown where the upstream
+# kernel is the vulnerability source, instead of being suppressed.
+match-upstream-kernel-headers: false
+
+# Ignore rules suppress specific vulnerability matches from the output.
+# All specified fields in a rule must match for the rule to apply.
+# See: /configuration/ignore-rules
+ignore: []
+# Example:
+#   - vulnerability: CVE-2023-1234
+#     package:
+#       name: libssl
+#       type: deb
+#     reason: "Mitigated by network policy"
+
+search:
+  # Layers to analyze for container images.
+  # Options: squashed, all-layers
+  # Equivalent to: -s / --scope
+  scope: squashed
+
+  # Search inside zip archives (e.g. jar files) that contain an index.
+  # Applies to the Java package cataloger.
+  indexed-archives: true
+
+  # Search inside archives that do not contain an index (tar, tar.gz, etc.).
+  # Warning: enabling this can significantly impact performance.
+  unindexed-archives: false
+
+match:
+  java:
+    # Use CPE matching for Java (Maven/Gradle) packages.
+    using-cpes: false
+
+  jvm:
+    # Use CPE matching for JVM runtime packages.
+    using-cpes: true
+
+  dotnet:
+    # Use CPE matching for .NET packages.
+    using-cpes: false
+
+  golang:
+    # Use CPE matching for Go modules.
+    using-cpes: false
+    # Always use CPE matching for the Go standard library.
+    always-use-cpe-for-stdlib: true
+    # Allow comparison of main module pseudo-versions
+    # (e.g. v0.0.0-20240413-2b432cf643...).
+    allow-main-module-pseudo-version-comparison: false
+
+  javascript:
+    using-cpes: false
+
+  python:
+    using-cpes: false
+
+  ruby:
+    using-cpes: false
+
+  rust:
+    using-cpes: false
+
+  hex:
+    # Use CPE matching for Elixir/Erlang packages.
+    using-cpes: false
+
+  stock:
+    # Use CPE matching for all other package types.
+    using-cpes: true
+
+  dpkg:
+    # How to handle missing epoch values in dpkg package versions.
+    # Options: zero (treat missing epoch as 0), auto (infer from constraint)
+    missing-epoch-strategy: zero
+    # Use CPE matching for packages from end-of-life distros.
+    use-cpes-for-eol: false
+
+  rpm:
+    missing-epoch-strategy: auto
+    use-cpes-for-eol: false
+
+registry:
+  # Skip TLS verification when pulling from a registry.
+  insecure-skip-tls-verify: false
+  # Use HTTP instead of HTTPS when connecting to a registry.
+  insecure-use-http: false
+  # Path to a CA certificate or directory of certificates.
+  ca-cert: ""
+  # Credentials for specific registries.
+  # See: /configuration/registry
+  auth: []
+
+db:
+  # Directory where Grype caches the vulnerability database.
+  cache-dir: "$XDG_CACHE_HOME/grype/db"
+  # URL to check for vulnerability database updates.
+  update-url: "https://grype.anchore.io/databases"
+  # Path to a CA certificate used when downloading the database.
+  ca-cert: ""
+  # Automatically check for and download database updates.
+  auto-update: true
+  # Validate the database checksum on every run.
+  validate-by-hash-on-start: false
+  # Ensure the database is not older than max-allowed-built-age.
+  validate-age: true
+  # Maximum age of the vulnerability database before it is considered stale.
+  max-allowed-built-age: 120h
+  # Fail the scan if a database update check cannot be completed.
+  require-update-check: false
+  # Timeout for checking whether a database update is available (~156 KiB file).
+  update-available-timeout: 30s
+  # Timeout for downloading the full vulnerability database (~156 MB file).
+  update-download-timeout: 300s
+  # Minimum time between database update checks.
+  max-update-check-frequency: 2h
+
+external-sources:
+  # Enable external network lookups for additional vulnerability data.
+  enable: false
+  maven:
+    # Search Maven Central by SHA1 for unidentified Java packages.
+    search-upstream: true
+    # Base URL of the Maven search service.
+    base-url: "https://search.maven.org/solrsearch/select"
+    # Rate limit for Maven searches (e.g. 300ms between requests).
+    rate-limit: 300ms
+
+fix-channel:
+  redhat-eus:
+    # Whether to apply Red Hat Extended Update Support (EUS) fix data.
+    # Options: never, always, auto (detect from SBOM data)
+    apply: auto
+    # Distro versions this channel applies to (constraint expression).
+    versions: ">= 8"
+
+alerts:
+  # Warn when packages come from a distro that has reached end-of-life.
+  enable-eol-distro-warnings: true
+```
+
+<Note>
+CLI flags always override environment variables, and environment variables always override the config file. Use `grype --help` to see the full list of available flags.
+</Note>

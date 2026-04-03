@@ -1,0 +1,301 @@
+---
+title: "Supported language package ecosystems"
+description: "Language-specific package managers and ecosystems supported by Grype, including matching strategies and configuration options."
+keywords: ["grype", "language packages", "go", "java", "javascript", "python", "ruby", "rust", "dotnet", "php", "erlang", "elixir", "hex", "bitnami", "npm", "pip", "cargo", "nuget", "maven"]
+---
+
+Grype scans language-specific packages from lock files, manifests, compiled binaries, SBOMs, and installed package databases. Each language ecosystem has a dedicated matcher that knows how to look up vulnerabilities for that package type.
+
+## Supported ecosystems
+
+| Language / runtime | Package manager(s) | Grype type | Matching strategy | Config options |
+|---|---|---|---|---|
+| Go | Go modules | `go-module` | Ecosystem + optional CPE | `match.golang.*` |
+| Java | Maven, Gradle | `java-archive` | Ecosystem + optional Maven search + optional CPE | `match.java.*`, `external-sources.maven.*` |
+| JavaScript / Node.js | npm, yarn, pnpm | `npm` | Ecosystem + optional CPE | `match.javascript.*` |
+| Python | pip, pipenv, poetry | `python` | Ecosystem + optional CPE | `match.python.*` |
+| Ruby | Bundler (RubyGems) | `gem` | Ecosystem + optional CPE | `match.ruby.*` |
+| Rust | Cargo | `rust-crate` | Ecosystem + optional CPE | `match.rust.*` |
+| .NET | NuGet | `dotnet` | Ecosystem + optional CPE | `match.dotnet.*` |
+| PHP | Composer | `php-composer` | CPE (stock matcher) | `match.stock.*` |
+| Erlang / Elixir | Hex | `hex`, `erlang-otp` | Ecosystem + optional CPE | `match.hex.*` |
+| Bitnami components | Bitnami catalog | `bitnami` | Bitnami ecosystem name | — |
+
+<Note>
+Grype also includes a **stock (CPE fallback) matcher** that covers any package type not listed above. It matches packages that have CPE data using NVD records. This is the default behaviour for PHP Composer packages and any other ecosystem without a dedicated matcher.
+</Note>
+
+## Ecosystem details
+
+<AccordionGroup>
+  <Accordion title="Go">
+
+**Grype type:** `go-module`  
+**Sources:** Go module graph (`go.sum`, `go.mod`), compiled Go binaries
+
+Go packages are matched by their full module path (for example, `github.com/gorilla/mux`) and version against the Go ecosystem vulnerability database.
+
+**Standard library**
+
+The Go standard library (`stdlib`) is treated as a special case. Because CPE-based matching is more reliable for stdlib CVEs than ecosystem-name matching, Grype uses CPE data for `stdlib` by default regardless of whether CPE matching is enabled for other Go modules.
+
+**Main module pseudo-versions**
+
+Go does not embed the main module's version in a compiled binary when the module has not been tagged with a release version. In that case, the version appears as `(devel)` or a pseudo-version like `v0.0.0-20240413-2b432cf643...`. By default, Grype skips matching for these values because the version cannot be meaningfully compared against vulnerability constraints.
+
+Enable pseudo-version comparison with caution — it can produce false positives:
+
+```yaml
+match:
+  golang:
+    allow-main-module-pseudo-version-comparison: false  # set to true to enable
+```
+
+**Configuration**
+
+```yaml
+match:
+  golang:
+    # Enable CPE matching for all Go modules (in addition to ecosystem matching)
+    using-cpes: false
+    # Always use CPE matching for the Go standard library
+    always-use-cpe-for-stdlib: true
+    # Allow matching on pseudo-versions (v0.0.0-... or (devel))
+    allow-main-module-pseudo-version-comparison: false
+```
+
+  </Accordion>
+
+  <Accordion title="Java">
+
+**Grype type:** `java-archive`  
+**Sources:** JAR, WAR, EAR files, Jenkins plugin archives (`.hpi`, `.jpi`)
+
+Java packages are matched by their Maven group ID and artifact ID (for example, `org.apache.commons:commons-lang3`) and version against the Java ecosystem vulnerability database.
+
+**Maven upstream search**
+
+When a JAR file lacks POM metadata (no `groupId` or `artifactId`), Grype can query Maven Central by SHA-1 digest to identify the package and then match it against vulnerability data. This requires network access and must be explicitly enabled:
+
+```yaml
+external-sources:
+  enable: true
+  maven:
+    search-upstream: true
+    base-url: "https://search.maven.org/solrsearch/select"
+```
+
+When `search-upstream` is enabled and the POM metadata is present, Grype uses the existing metadata directly without making a network request.
+
+**Configuration**
+
+```yaml
+match:
+  java:
+    # Enable CPE matching for Java packages (in addition to ecosystem matching)
+    using-cpes: false
+
+external-sources:
+  enable: false
+  maven:
+    search-upstream: true
+    base-url: "https://search.maven.org/solrsearch/select"
+```
+
+  </Accordion>
+
+  <Accordion title="JavaScript / Node.js">
+
+**Grype type:** `npm`  
+**Sources:** `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `node_modules/`
+
+JavaScript packages are matched by package name and version against the npm ecosystem vulnerability database. The matcher handles packages installed via npm, Yarn, and pnpm — all of which produce packages with the `npm` type in the SBOM.
+
+**Configuration**
+
+```yaml
+match:
+  javascript:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title="Python">
+
+**Grype type:** `python`  
+**Sources:** `requirements.txt`, `Pipfile.lock`, `poetry.lock`, installed packages in `site-packages/`
+
+Python packages are matched by name and version against the PyPI ecosystem vulnerability database.
+
+**Configuration**
+
+```yaml
+match:
+  python:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title="Ruby">
+
+**Grype type:** `gem`  
+**Sources:** `Gemfile.lock`, installed gems
+
+Ruby packages are matched by gem name and version against the RubyGems ecosystem vulnerability database.
+
+**Configuration**
+
+```yaml
+match:
+  ruby:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title="Rust">
+
+**Grype type:** `rust-crate`  
+**Sources:** `Cargo.lock`, compiled Rust binaries
+
+Rust packages are matched by crate name and version against the RustSec advisory database ecosystem data.
+
+**Configuration**
+
+```yaml
+match:
+  rust:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title=".NET">
+
+**Grype type:** `dotnet`  
+**Sources:** `packages.lock.json`, `.deps.json`, installed NuGet packages
+
+.NET packages are matched by NuGet package name and version against the NuGet ecosystem vulnerability database.
+
+**Configuration**
+
+```yaml
+match:
+  dotnet:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title="PHP">
+
+**Grype type:** `php-composer`  
+**Sources:** `composer.lock`
+
+PHP Composer packages do not have a dedicated ecosystem matcher. They are matched using the **stock (CPE fallback) matcher**, which searches NVD data using CPE identifiers. CPE matching is enabled by default for the stock matcher.
+
+```yaml
+match:
+  stock:
+    using-cpes: true  # default — required for PHP packages
+```
+
+<Warning>
+PHP packages require CPE data to match vulnerabilities. If a package does not have CPE data in the SBOM, use `--add-cpes-if-none` to generate CPEs automatically, or ensure the input SBOM includes CPEs.
+</Warning>
+
+  </Accordion>
+
+  <Accordion title="Erlang and Elixir">
+
+**Grype types:** `hex`, `erlang-otp`  
+**Sources:** `mix.lock` (Elixir/Erlang Hex packages), Erlang/OTP runtime packages
+
+Hex packages (Elixir and Erlang libraries from hex.pm) and Erlang/OTP runtime packages are matched using the Hex ecosystem vulnerability database, with optional CPE fallback.
+
+**Configuration**
+
+```yaml
+match:
+  hex:
+    using-cpes: false
+```
+
+  </Accordion>
+
+  <Accordion title="Bitnami">
+
+**Grype type:** `bitnami`  
+**Sources:** Bitnami SBOM metadata embedded in Bitnami container images
+
+Bitnami packages are matched by their package name against the Bitnami vulnerability dataset. The Bitnami matcher uses the package URL (PURL) metadata — including name, version, revision, distribution, and architecture — to look up vulnerabilities from Bitnami's own advisory data.
+
+No additional configuration is required. The Bitnami matcher is automatically invoked for packages of type `bitnami`.
+
+  </Accordion>
+</AccordionGroup>
+
+## CPE-based matching
+
+Several matchers support optional CPE (Common Platform Enumeration) matching. When enabled, Grype additionally searches NVD vulnerability records using the package's CPE identifiers alongside ecosystem-specific matching.
+
+CPE matching is useful when:
+
+- An ecosystem database does not yet contain an advisory for a known CVE.
+- The package has a CPE in the SBOM but no ecosystem-specific advisory exists in Grype's database.
+
+### Enabling CPE matching per ecosystem
+
+```yaml
+match:
+  golang:
+    using-cpes: false
+  java:
+    using-cpes: false
+  javascript:
+    using-cpes: false
+  python:
+    using-cpes: false
+  ruby:
+    using-cpes: false
+  rust:
+    using-cpes: false
+  dotnet:
+    using-cpes: false
+  hex:
+    using-cpes: false
+  stock:
+    using-cpes: true   # default; covers PHP and other unrecognised types
+```
+
+### The `--add-cpes-if-none` flag
+
+When scanning third-party SBOMs or packages that were not catalogued with CPE data, use `--add-cpes-if-none` to instruct Grype to generate CPEs for packages that lack them:
+
+```bash
+grype sbom:third-party-sbom.json --add-cpes-if-none
+```
+
+This is equivalent to setting `add-cpes-if-none: true` in your config file:
+
+```yaml
+add-cpes-if-none: true
+```
+
+<Note>
+Grype generates CPEs using a best-effort heuristic based on package name and version. Generated CPEs may not always match the exact CPE used in NVD records, which can result in missed matches or false positives. For best results, use SBOMs that include CPEs sourced from authoritative data.
+</Note>
+
+## The stock (CPE fallback) matcher
+
+The stock matcher is a catch-all that handles any package type not claimed by a dedicated matcher. It matches packages using CPE identifiers against NVD data. CPE matching is enabled by default for the stock matcher.
+
+Any package type not listed in the table above — including PHP Composer packages — is handled by the stock matcher.
+
+```yaml
+match:
+  stock:
+    using-cpes: true
+```

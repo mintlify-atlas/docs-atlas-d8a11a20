@@ -1,97 +1,81 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Grype — Vulnerability Scanner"
+description: "A fast, open-source vulnerability scanner for container images, filesystems, and SBOMs. Find known vulnerabilities across dozens of OS and language package ecosystems."
 ---
 
-## Setting up
+Grype is a command-line vulnerability scanner built by [Anchore](https://anchore.com). Scan container images, local directories, and SBOMs to find known vulnerabilities across major OS distributions and language ecosystems — in seconds.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Grype via curl, Homebrew, Docker, or package managers in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first container image and understand the results.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Scan targets" icon="crosshairs" href="/scanning/scan-targets">
+    Learn all the ways you can point Grype at a target to scan.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Complete reference for every flag, option, and subcommand.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What Grype scans
 
-Everything you need to create world-class documentation.
+Grype can scan virtually any artifact in your software supply chain:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="Container images" icon="docker">
+    Docker, OCI, Podman, and Singularity image formats
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Filesystems" icon="folder-open">
+    Local directories, tarballs, and individual files
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="SBOMs" icon="file-code">
+    Syft JSON, CycloneDX, SPDX, and more
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Get started
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Install Grype">
+    ```bash
+    curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+    ```
+  </Step>
+  <Step title="Scan a container image">
+    ```bash
+    grype alpine:latest
+    ```
+  </Step>
+  <Step title="Review the results">
+    Grype displays a table of vulnerabilities with severity, CVE ID, affected package, and fix version. Use `-o json` for machine-readable output.
+  </Step>
+  <Step title="Integrate with CI/CD">
+    Add `--fail-on high` to exit with code `2` if high or critical vulnerabilities are found — perfect for blocking pipelines.
+  </Step>
+</Steps>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="EPSS & KEV scoring" icon="chart-bar" href="/guides/epss-kev-scoring">
+    Prioritize findings by exploit probability and known exploited vulnerabilities.
+  </Card>
+  <Card title="VEX support" icon="shield-check" href="/configuration/vex">
+    Apply OpenVEX and CSAF documents to filter out non-applicable findings.
+  </Card>
+  <Card title="Flexible output" icon="file-export" href="/scanning/output-formats">
+    Export results as JSON, CycloneDX, SARIF, or custom Go templates.
+  </Card>
+  <Card title="Ignore rules" icon="filter" href="/configuration/ignore-rules">
+    Suppress known false positives with fine-grained ignore rules.
+  </Card>
+  <Card title="Offline support" icon="database" href="/database/overview">
+    Works offline with a local vulnerability database that updates automatically.
+  </Card>
+  <Card title="Broad ecosystem coverage" icon="globe" href="/reference/os-packages">
+    Covers Alpine, Debian, RHEL, Ubuntu, Amazon Linux, and many language ecosystems.
+  </Card>
+</CardGroup>

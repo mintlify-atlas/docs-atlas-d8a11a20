@@ -1,0 +1,505 @@
+---
+title: "Database Commands"
+description: "Complete reference for all grype db subcommands used to manage the local vulnerability database."
+---
+
+Grype maintains a local vulnerability database that it downloads from Anchore's distribution service. The `grype db` group of commands lets you inspect, update, search, and manage that database.
+
+**Usage**
+
+```bash
+grype db <subcommand> [flags]
+```
+
+---
+
+<Accordion title="grype db status">
+
+Display the status and metadata of the currently installed vulnerability database.
+
+**Usage**
+
+```bash
+grype db status [flags]
+```
+
+**Flags**
+
+<ParamField body="--output" type="string" default="text">
+  Output format.
+
+  Options: `text`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Example output (text)**
+
+```
+Path:      /home/user/.cache/grype/db
+Schema:    6.0.0
+Built:     2024-04-17T00:00:00Z
+From:      https://grype.anchore.io/databases/
+Status:    valid
+```
+
+**Example output (json)**
+
+```json
+{
+  "path": "/home/user/.cache/grype/db",
+  "schemaVersion": "6.0.0",
+  "built": "2024-04-17T00:00:00Z",
+  "from": "https://grype.anchore.io/databases/",
+  "error": null
+}
+```
+
+</Accordion>
+
+<Accordion title="grype db update">
+
+Download and install the latest vulnerability database from the configured update URL.
+
+**Usage**
+
+```bash
+grype db update
+```
+
+<Note>
+  This command bypasses the `max-update-check-frequency` throttle so an update check is always attempted when run explicitly.
+</Note>
+
+**Example**
+
+```bash
+grype db update
+# Vulnerability database updated to latest version!
+```
+
+If the database is already up to date:
+
+```bash
+grype db update
+# No vulnerability database update available
+```
+
+</Accordion>
+
+<Accordion title="grype db check">
+
+Check whether a newer vulnerability database is available without downloading it.
+
+**Usage**
+
+```bash
+grype db check [flags]
+```
+
+**Flags**
+
+<ParamField body="--output" type="string" default="text">
+  Output format.
+
+  Options: `text`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Exit codes**
+
+- `0` — no update available
+- `1` — an update is available (`ErrDBUpgradeAvailable`)
+
+**Example output (text)**
+
+```
+Installed DB version 6.0.0 was built on 2024-04-15 00:00:00 +0000 UTC
+Updated DB version 6.0.1 was built on 2024-04-17 00:00:00 +0000 UTC
+You can run 'grype db update' to update to the latest db
+```
+
+**Example output (json)**
+
+```json
+{
+  "currentDB": {
+    "schemaVersion": "6.0.0",
+    "built": "2024-04-15T00:00:00Z"
+  },
+  "candidateDB": {
+    "schemaVersion": "6.0.1",
+    "built": "2024-04-17T00:00:00Z"
+  },
+  "updateAvailable": true
+}
+```
+
+</Accordion>
+
+<Accordion title="grype db list">
+
+List the available vulnerability databases according to the configured listing URL.
+
+**Usage**
+
+```bash
+grype db list [flags]
+```
+
+**Flags**
+
+<ParamField body="--output" type="string" default="text">
+  Output format.
+
+  Options: `text`, `raw`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Example output (text)**
+
+```
+Status:   active
+Schema:   6.0.1
+Built:    2024-04-17 00:00:00 +0000 UTC
+Listing:  https://grype.anchore.io/databases/v6/latest.json
+DB URL:   https://grype.anchore.io/databases/v6/vulnerability-db_v6.0.1_2024-04-17T00:00:00Z_abc123.tar.zst
+Checksum: sha256:abc123...
+```
+
+</Accordion>
+
+<Accordion title="grype db delete">
+
+Remove the locally installed vulnerability database.
+
+**Usage**
+
+```bash
+grype db delete
+```
+
+<Tip>
+  If the database is corrupt (e.g. checksum validation fails), running `grype db delete` followed by `grype db update` is the recommended recovery procedure.
+</Tip>
+
+**Example**
+
+```bash
+grype db delete
+# Vulnerability database deleted
+```
+
+</Accordion>
+
+<Accordion title="grype db import">
+
+Import a vulnerability database from a local file path or a remote URL. This is useful in air-gapped environments where the database cannot be downloaded automatically.
+
+**Usage**
+
+```bash
+grype db import FILE | URL
+```
+
+If the URL includes a `checksum` query parameter with a fully qualified digest (e.g. `sha256:abc123...`), the archive is verified against that value before installation.
+
+**Examples**
+
+```bash
+# Import from a local file
+grype db import /path/to/vulnerability-db.tar.zst
+
+# Import from a URL
+grype db import https://example.internal/grype/vulnerability-db_v6.tar.zst
+
+# Import from a URL with checksum verification
+grype db import "https://example.internal/grype/vulnerability-db_v6.tar.zst?checksum=sha256:abc123..."
+```
+
+<Note>
+  Database archives can be obtained from the listing URL shown by `grype db list`.
+</Note>
+
+</Accordion>
+
+<Accordion title="grype db diff">
+
+Diff two vulnerability databases and show packages with added, removed, or modified vulnerability matches.
+
+**Usage**
+
+```bash
+grype db diff [flags] <old_db_url_or_path> [new_db_url_or_path]
+```
+
+If only one argument is given, it is used as the "old" database and the currently installed database is used as the "new" one.
+
+**Flags**
+
+<ParamField body="--output" type="string" default="text">
+  Output format.
+
+  Options: `text`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+<ParamField body="--packages" type="boolean">
+  Only include package-level diff results.
+</ParamField>
+
+<ParamField body="--vulns" type="boolean">
+  Only include vulnerability-level diff results.
+</ParamField>
+
+**Example**
+
+```bash
+# Diff the installed DB against a local archive
+grype db diff /path/to/old-vulnerability-db.tar.zst
+
+# Diff two specific databases
+grype db diff /path/to/old-db.tar.zst /path/to/new-db.tar.zst
+
+# Output as JSON
+grype db diff --output json /path/to/old-db.tar.zst
+```
+
+**Example output (text)**
+
+```
+ECOSYSTEM       PACKAGE
+npm             log4j-core
+python          cryptography
+rpm             openssl
+```
+
+**Example output (json)**
+
+```json
+{
+  "packages": [
+    {
+      "ecosystem": "npm",
+      "name": "log4j-core",
+      "vulnerabilities": {
+        "added": ["CVE-2021-44228"],
+        "removed": [],
+        "modified": []
+      }
+    }
+  ]
+}
+```
+
+</Accordion>
+
+<Accordion title="grype db search">
+
+Search the vulnerability database for affected packages or vulnerabilities.
+
+**Usage**
+
+```bash
+grype db search [flags] [PACKAGE_OR_VULN_ID...]
+```
+
+Positional arguments are interpreted automatically:
+- Strings starting with `cve-`, `ghsa-`, `elsa-`, `rhsa-`, or matching the ALAS pattern are treated as vulnerability IDs.
+- Strings starting with `cpe:` or `purl:` are treated as package specifiers.
+- Everything else is treated as a package name.
+
+**Flags**
+
+<ParamField body="--pkg" type="string[]">
+  Package name, CPE, or PURL to search for. May be repeated.
+
+  - Plain name: `log4j`
+  - PURL: `pkg:rpm/redhat/openssl` (version is ignored)
+  - CPE: `cpe:2.3:a:jetty:jetty_http_server:*:*:*:*:*:*:*:*` (version is ignored)
+</ParamField>
+
+<ParamField body="--vuln" type="string[]">
+  Vulnerability ID to filter results by. May be repeated.
+</ParamField>
+
+<ParamField body="--ecosystem" type="string">
+  Restrict results to a specific package ecosystem (e.g. `rpm`, `npm`, `python`). Cannot be combined with a PURL `--pkg` argument.
+</ParamField>
+
+<ParamField body="--distro" type="string[]">
+  Filter results to a specific OS distribution. May be repeated.
+
+  Format: `name`, `name[-:@]version`, `name[-:@]maj.min`, or `name[-:@]codename`
+
+  Examples: `ubuntu`, `ubuntu:22.04`, `alpine@3.18`, `debian-bookworm`
+</ParamField>
+
+<ParamField body="--provider" type="string[]">
+  Only show results from the given vulnerability data provider. May be repeated.
+</ParamField>
+
+<ParamField body="--fixed-state" type="string[]">
+  Only show vulnerabilities with the given fix state. May be repeated.
+
+  Options: `fixed`, `not-fixed`, `unknown`, `wont-fix`
+</ParamField>
+
+<ParamField body="--published-after" type="string">
+  Only show vulnerabilities originally published after the given date.
+
+  Format: `YYYY-MM-DD`
+</ParamField>
+
+<ParamField body="--modified-after" type="string">
+  Only show vulnerabilities published or modified since the given date.
+
+  Format: `YYYY-MM-DD`
+
+  Cannot be combined with `--published-after`.
+</ParamField>
+
+<ParamField body="--broad-cpe-matching" type="boolean" default="false">
+  Allow specific package CPE attributes to match vulnerability records that use wildcard (`*`) values.
+</ParamField>
+
+<ParamField body="--limit" type="integer" default="5000">
+  Maximum number of results to return. Use `0` for no limit.
+</ParamField>
+
+<ParamField body="--output" type="string" default="table">
+  Output format.
+
+  Options: `table`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Examples**
+
+```bash
+# Find all packages affected by a CVE
+grype db search --vuln CVE-2021-44228
+
+# Find all vulnerabilities affecting a package name
+grype db search --pkg log4j
+
+# Narrow package search by vulnerability
+grype db search --pkg log4j --vuln CVE-2021-44228
+
+# Search by PURL (version is not considered)
+grype db search --pkg 'pkg:rpm/redhat/openssl'
+
+# Search by CPE (version is not considered)
+grype db search --pkg 'cpe:2.3:a:jetty:jetty_http_server:*:*:*:*:*:*:*:*'
+
+# Filter by OS distro
+grype db search --pkg openssl --distro ubuntu:22.04
+
+# Output as JSON
+grype db search --pkg openssl --output json
+```
+
+**Example output (table)**
+
+```
+VULNERABILITY       PACKAGE         ECOSYSTEM   NAMESPACE                   VERSION CONSTRAINT
+CVE-2021-44228      log4j-core      java        github:language:java        >= 2.0.0, < 2.15.0
+CVE-2021-45046      log4j-core      java        github:language:java        >= 2.0.0, < 2.16.0
+```
+
+---
+
+#### grype db search vuln
+
+Search for vulnerability records directly (rather than affected packages). Requires DB schema v6+.
+
+**Usage**
+
+```bash
+grype db search vuln [flags] ID [ID...]
+```
+
+**Aliases:** `vulnerability`, `vulnerabilities`, `vulns`
+
+**Flags**
+
+<ParamField body="--provider" type="string[]">
+  Only show results from the given provider.
+</ParamField>
+
+<ParamField body="--limit" type="integer" default="5000">
+  Maximum number of results to return.
+</ParamField>
+
+<ParamField body="--output" type="string" default="table">
+  Output format.
+
+  Options: `table`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Example**
+
+```bash
+grype db search vuln CVE-2021-44228
+grype db search vuln CVE-2021-44228 CVE-2021-45046 --output json
+```
+
+**Example output (table)**
+
+```
+ID                  PROVIDER    PUBLISHED    SEVERITY   REFERENCE
+CVE-2021-44228      nvd         2021-12-10   critical   https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+```
+
+</Accordion>
+
+<Accordion title="grype db providers">
+
+List the vulnerability data providers included in the currently installed database.
+
+**Usage**
+
+```bash
+grype db providers [flags]
+```
+
+**Flags**
+
+<ParamField body="--output" type="string" default="table">
+  Output format.
+
+  Options: `table`, `json`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+**Example output (table)**
+
+```
+NAME        VERSION   PROCESSOR   DATE CAPTURED               INPUT DIGEST
+nvd         5.0.0     vunnel      2024-04-17 00:00:00 +0000   sha256:abc123...
+github      4.0.0     vunnel      2024-04-17 00:00:00 +0000   sha256:def456...
+rhel        3.0.0     vunnel      2024-04-17 00:00:00 +0000   sha256:789abc...
+```
+
+**Example output (json)**
+
+```json
+[
+  {
+    "name": "nvd",
+    "version": "5.0.0",
+    "processor": "vunnel",
+    "dateCaptured": "2024-04-17T00:00:00Z",
+    "inputDigest": "sha256:abc123..."
+  }
+]
+```
+
+</Accordion>

@@ -1,0 +1,143 @@
+---
+title: "Installation"
+description: "Install Grype on Linux, macOS, or Windows using curl, Homebrew, Docker, Chocolatey, MacPorts, or by building from source."
+---
+
+## Quick install
+
+The fastest way to install Grype is with the install script:
+
+```bash
+curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+```
+
+This script detects your OS and architecture, downloads the correct release binary from GitHub, verifies its checksum, and installs it to `/usr/local/bin`.
+
+<Tip>
+  You can install to a different directory by changing the `-b` flag. For example, `-b ~/.local/bin` installs to your home directory without requiring `sudo`.
+</Tip>
+
+## All installation methods
+
+<CodeGroup>
+
+```bash curl (Linux / macOS)
+curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+```
+
+```bash Homebrew (macOS / Linux)
+brew install anchore/grype/grype
+```
+
+```bash Docker
+docker pull anchore/grype
+docker run --rm anchore/grype alpine:latest
+```
+
+```bash Chocolatey (Windows)
+choco install grype
+```
+
+```bash MacPorts (macOS)
+sudo port install grype
+```
+
+```bash Go (build from source)
+go install github.com/anchore/grype/cmd/grype@latest
+```
+
+</CodeGroup>
+
+### Install script options
+
+The install script accepts optional flags:
+
+| Flag | Description |
+|---|---|
+| `-b DIR` | Installation directory (default: `./bin`) |
+| `-d` | Enable debug logging |
+| `-dd` | Enable trace logging |
+| `-v` | Verify checksum signature with cosign |
+| `TAG` | Install a specific release tag (e.g., `v0.80.0`) |
+
+To install a specific version:
+
+```bash
+curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin v0.80.0
+```
+
+### Docker usage
+
+When scanning with Docker, you need to mount the Docker socket or pass the image as a tarball. To scan a local directory, mount it as a volume:
+
+```bash
+# Scan a container image
+docker run --rm anchore/grype alpine:latest
+
+# Scan a local directory
+docker run --rm -v /path/to/project:/project anchore/grype dir:/project
+```
+
+<Warning>
+  Scanning images from a Docker daemon requires mounting the Docker socket (`-v /var/run/docker.sock:/var/run/docker.sock`). Prefer `registry:` or OCI archive inputs when running Grype inside containers.
+</Warning>
+
+## Verify your installation
+
+After installing, confirm Grype is working:
+
+```bash
+grype version
+```
+
+You should see output similar to:
+
+```
+Application:          grype
+Version:              0.x.x
+BuildDate:            2025-xx-xxTxx:xx:xxZ
+GitCommit:            ...
+GoVersion:            go1.xx
+Platform:             linux/amd64
+```
+
+## Shell completion
+
+Grype supports tab completion for `bash`, `zsh`, `fish`, and PowerShell.
+
+<CodeGroup>
+
+```bash bash
+# Add to ~/.bashrc
+source <(grype completion bash)
+```
+
+```zsh zsh
+# Add to ~/.zshrc
+source <(grype completion zsh)
+```
+
+```fish fish
+# Run once to install
+grype completion fish | source
+```
+
+```powershell PowerShell
+# Add to your PowerShell profile
+grype completion powershell | Out-String | Invoke-Expression
+```
+
+</CodeGroup>
+
+To make completion persistent, add the appropriate command to your shell's configuration file (`~/.bashrc`, `~/.zshrc`, etc.) and reload your shell.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first scan and learn how to read the results.
+  </Card>
+  <Card title="Scan targets" icon="crosshairs" href="/scanning/scan-targets">
+    Explore all the input types Grype supports.
+  </Card>
+</CardGroup>

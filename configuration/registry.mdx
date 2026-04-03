@@ -1,0 +1,173 @@
+---
+title: "Registry authentication"
+description: "Configure Grype to authenticate with private container registries when scanning images."
+---
+
+When scanning container images hosted in private registries, Grype needs credentials to pull the image. You can provide credentials through your config file, environment variables, or your existing Docker credential helpers.
+
+## Docker credential helpers (automatic)
+
+Grype automatically uses credentials from your Docker configuration (`~/.docker/config.json`). If you are already logged in to a registry with `docker login`, Grype will use those credentials without any additional configuration.
+
+```bash
+docker login registry.example.com
+grype registry.example.com/myimage:latest
+```
+
+## Forcing a registry pull
+
+By default, Grype may use the Docker daemon to pull images. Use `--from registry` to force Grype to pull directly from the registry:
+
+```bash
+grype registry:registry.example.com/myimage:latest
+```
+
+Or set the default pull source in your config:
+
+```yaml
+default-image-pull-source: registry
+```
+
+## Config file authentication
+
+For environments where Docker credential helpers are not available (such as CI pipelines), configure credentials directly in your Grype config file.
+
+```yaml
+registry:
+  auth:
+    - authority: registry.example.com
+      username: myuser
+      password: mypassword
+```
+
+<Warning>
+Avoid committing credentials to source control. Use environment variables or a secrets manager to inject credentials at runtime.
+</Warning>
+
+## Token-based authentication
+
+Some registries (such as those using bearer tokens) support token authentication instead of username and password. Token auth is mutually exclusive with username/password.
+
+```yaml
+registry:
+  auth:
+    - authority: ghcr.io
+      token: ghp_your_personal_access_token
+```
+
+## Multiple registries
+
+You can configure credentials for multiple registries in the `auth` list. Each entry applies to a specific authority:
+
+```yaml
+registry:
+  auth:
+    - authority: registry.example.com
+      username: myuser
+      password: mypassword
+
+    - authority: ghcr.io
+      token: ghp_your_personal_access_token
+
+    - authority: 012345678901.dkr.ecr.us-east-1.amazonaws.com
+      username: AWS
+      password: "eyJwYXlsb2Fk..."
+```
+
+## Environment variable authentication
+
+You can inject a single set of registry credentials via environment variables without modifying the config file. These credentials take precedence over anything in the config file.
+
+| Environment variable | Description |
+|---|---|
+| `GRYPE_REGISTRY_AUTH_AUTHORITY` | Registry hostname (e.g. `registry.example.com`) |
+| `GRYPE_REGISTRY_AUTH_USERNAME` | Username for basic auth |
+| `GRYPE_REGISTRY_AUTH_PASSWORD` | Password for basic auth |
+| `GRYPE_REGISTRY_AUTH_TOKEN` | Token for bearer auth (mutually exclusive with username/password) |
+| `GRYPE_REGISTRY_AUTH_TLS_CERT` | Path to a client TLS certificate |
+| `GRYPE_REGISTRY_AUTH_TLS_KEY` | Path to the client TLS key |
+
+```bash
+GRYPE_REGISTRY_AUTH_AUTHORITY=registry.example.com \
+GRYPE_REGISTRY_AUTH_USERNAME=myuser \
+GRYPE_REGISTRY_AUTH_PASSWORD=mypassword \
+grype registry.example.com/myimage:latest
+```
+
+## Mutual TLS (mTLS)
+
+If your registry requires client certificates for mutual TLS authentication, provide the certificate and key paths per entry:
+
+```yaml
+registry:
+  auth:
+    - authority: registry.example.com
+      tls-cert: /path/to/client.crt
+      tls-key: /path/to/client.key
+```
+
+## TLS settings
+
+<AccordionGroup>
+
+  <Accordion title="Custom CA certificate">
+    If your registry uses a certificate signed by a private CA, provide the CA certificate so Grype can verify the connection:
+
+    ```yaml
+    registry:
+      ca-cert: /path/to/ca.crt
+    ```
+
+    The value can be a path to a single `.crt`, `.cert`, or `.pem` file, or a directory containing multiple certificate files.
+  </Accordion>
+
+  <Accordion title="Skip TLS verification">
+    <Warning>
+    Disabling TLS verification exposes you to man-in-the-middle attacks. Only use this in isolated development or testing environments.
+    </Warning>
+
+    ```yaml
+    registry:
+      insecure-skip-tls-verify: true
+    ```
+  </Accordion>
+
+  <Accordion title="Use HTTP instead of HTTPS">
+    <Warning>
+    Using plain HTTP means credentials and image layers are transmitted without encryption. Do not use this in production.
+    </Warning>
+
+    ```yaml
+    registry:
+      insecure-use-http: true
+    ```
+  </Accordion>
+
+</AccordionGroup>
+
+## Complete registry configuration example
+
+```yaml
+registry:
+  # Verify the server's TLS certificate (default: true).
+  insecure-skip-tls-verify: false
+
+  # Use HTTP instead of HTTPS (default: false).
+  insecure-use-http: false
+
+  # Path to a CA certificate or directory of certificates.
+  ca-cert: ""
+
+  # Credentials for each registry authority.
+  auth:
+    - authority: registry.example.com
+      username: myuser
+      password: mypassword
+
+    - authority: ghcr.io
+      token: ghp_your_token_here
+
+    - authority: private-registry.internal
+      tls-cert: /etc/grype/certs/client.crt
+      tls-key: /etc/grype/certs/client.key
+```

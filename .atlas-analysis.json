@@ -1,0 +1,112 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Grype",
+  "projectDescription": "A fast, open-source vulnerability scanner for container images, filesystems, and SBOMs that supports dozens of OS and language package ecosystems.",
+  "theme": "aspen",
+  "primaryColor": "#2D6BE4",
+  "lightColor": "#EBF1FD",
+  "darkColor": "#1A3F8F",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Scanning",
+            "pages": [
+              "scanning/scan-targets",
+              "scanning/sbom-scanning",
+              "scanning/output-formats",
+              "scanning/interpreting-results"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/ignore-rules",
+              "configuration/vex",
+              "configuration/registry"
+            ]
+          },
+          {
+            "group": "Database",
+            "pages": [
+              "database/overview",
+              "database/management"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/ci-cd-integration",
+              "guides/github-actions",
+              "guides/custom-templates",
+              "guides/epss-kev-scoring"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/cli",
+              "reference/db-commands",
+              "reference/exit-codes"
+            ]
+          },
+          {
+            "group": "Supported Ecosystems",
+            "pages": [
+              "reference/os-packages",
+              "reference/language-packages"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Scan container images, filesystems, and SBOMs for known vulnerabilities",
+    "Supports major OS package ecosystems (Alpine, Debian, Ubuntu, RHEL, Amazon Linux, and more)",
+    "Supports language-specific packages (Go, Java, Python, Ruby, JavaScript, Rust, .NET, and more)",
+    "Threat prioritization with EPSS, KEV, and risk scoring",
+    "OpenVEX and CSAF support for filtering and augmenting scan results",
+    "Multiple output formats: table, JSON, CycloneDX, SARIF, and custom Go templates",
+    "Configurable ignore rules to suppress known false positives",
+    "Offline-capable with a local vulnerability database",
+    "Docker, OCI, Podman, and Singularity image format support",
+    "CI/CD-friendly with configurable fail-on-severity thresholds"
+  ],
+  "publicApiSurface": [
+    "grype [IMAGE] — scan a container image for vulnerabilities",
+    "grype dir:[PATH] — scan a local filesystem directory",
+    "grype sbom:[PATH] — scan an SBOM file",
+    "grype file:[PATH] — scan a single file",
+    "grype registry:[IMAGE] — pull and scan directly from a registry",
+    "grype db update — update the vulnerability database",
+    "grype db status — show vulnerability database status",
+    "grype db search — search the vulnerability database",
+    "grype db diff — diff two vulnerability databases",
+    "grype db list — list available vulnerability databases",
+    "grype explain --id [CVE-ID] — explain a specific vulnerability finding",
+    "-o table|json|cyclonedx|sarif|template — output format selection",
+    "-f [SEVERITY] / --fail-on — set severity threshold for non-zero exit code",
+    "--vex [FILE] — apply a VEX document to filter results",
+    "--ignore — configure ignore rules via config file or flags",
+    "--only-fixed / --only-notfixed — filter results by fix availability",
+    "--by-cve — orient results by CVE ID",
+    "--scope squashed|all-layers — configure image layer scanning scope"
+  ]
+}

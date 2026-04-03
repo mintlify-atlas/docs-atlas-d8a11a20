@@ -1,0 +1,80 @@
+---
+title: "Introduction"
+description: "Grype is an open-source vulnerability scanner for container images, filesystems, and SBOMs. Find known vulnerabilities across major OS and language package ecosystems."
+---
+
+Grype is a command-line vulnerability scanner built by [Anchore](https://anchore.com). It catalogs all packages in your target — container images, local directories, or SBOMs — then matches them against a curated vulnerability database to surface known CVEs and advisories.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Grype via curl, Homebrew, Docker, or package managers.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first container image and understand the output.
+  </Card>
+</CardGroup>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="OS ecosystem coverage" icon="server">
+    Scans packages from Alpine, Debian, Ubuntu, RHEL, Oracle Linux, Amazon Linux, and more.
+  </Card>
+  <Card title="Language ecosystem coverage" icon="code">
+    Detects vulnerabilities in Ruby, Java, JavaScript, Python, .NET, Go, PHP, Rust, Erlang, and more.
+  </Card>
+  <Card title="EPSS & KEV prioritization" icon="chart-bar">
+    Rank findings by exploit probability (EPSS) and known exploited vulnerabilities (KEV) for smarter remediation.
+  </Card>
+  <Card title="OpenVEX support" icon="shield-check">
+    Apply VEX documents to filter or augment scan results and suppress non-applicable findings.
+  </Card>
+  <Card title="Flexible output formats" icon="file-export">
+    Export results as a table, JSON, CycloneDX (JSON or XML), SARIF, or custom Go templates.
+  </Card>
+  <Card title="Broad scan targets" icon="crosshairs">
+    Scan container images, local directories, individual files, SBOMs, package URLs (PURLs), and CPEs.
+  </Card>
+</CardGroup>
+
+## Supported image formats
+
+Grype supports all major container image formats:
+
+| Format | Example |
+|---|---|
+| Docker daemon | `grype yourrepo/yourimage:tag` |
+| OCI archive | `grype oci-archive:path/to/yourimage.tar` |
+| OCI directory | `grype oci-dir:path/to/yourimage` |
+| Podman daemon | `grype podman:yourrepo/yourimage:tag` |
+| Singularity (SIF) | `grype singularity:path/to/yourimage.sif` |
+| Registry (no daemon) | `grype registry:yourrepo/yourimage:tag` |
+
+## How Grype works
+
+When you run a scan, Grype performs three steps in parallel:
+
+1. **Fetches the vulnerability database.** Grype downloads and caches a vulnerability database aggregated from NVD, GitHub Advisory Database, and OS-specific sources. The database updates automatically on each run.
+
+2. **Catalogs packages.** Grype uses [Syft](https://github.com/anchore/syft) under the hood to enumerate all packages in the target — OS packages (rpm, deb, apk), language packages (pip, npm, gem, jar, etc.), and more.
+
+3. **Matches packages against the database.** Each cataloged package is compared against the vulnerability database using ecosystem-specific matchers (dpkg, rpm, Java, Python, Go, and others). Matches are deduplicated, filtered by any ignore rules, and then displayed.
+
+<Note>
+  Grype can also accept an SBOM as input, skipping the cataloging step entirely for faster scans on targets you've already inventoried with Syft.
+</Note>
+
+## Supported scan targets
+
+Beyond container images, Grype can scan:
+
+- **Filesystems and directories** — `grype dir:./my-project`
+- **Individual files** — `grype file:path/to/binary`
+- **SBOMs** — `grype sbom:./sbom.json` (Syft JSON, CycloneDX, SPDX)
+- **Package URLs (PURLs)** — `grype purl:path/to/purl/file` or a single PURL directly
+- **CPEs** — `grype cpes:path/to/cpes/file` or a single CPE directly (e.g. `cpe:2.3:a:openssl:openssl:3.0.14:*:*:*:*:*:*:*`)
+- **Piped SBOM input** — `syft alpine:latest -o json | grype`
+
+## License and sponsorship
+
+Grype is released under the [Apache-2.0 License](https://github.com/anchore/grype/blob/main/LICENSE) and is sponsored by [Anchore](https://anchore.com).

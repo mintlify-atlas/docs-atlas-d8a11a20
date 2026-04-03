@@ -1,0 +1,192 @@
+---
+title: "Interpreting results"
+description: "Understand Grype's table output columns, severity levels, fix states, exit codes, and how to dig deeper into specific findings."
+keywords: ["grype", "results", "severity", "cve", "fix state", "exit code", "epss", "kev", "explain"]
+---
+
+## Table output columns
+
+The default table output has the following columns:
+
+| Column | Description |
+|--------|-------------|
+| **Name** | Package name |
+| **Installed** | Version of the package found in the scan target |
+| **Fixed In** | Version that fixes the vulnerability, or empty if unknown / not fixed |
+| **Type** | Package type (`deb`, `rpm`, `apk`, `npm`, `pypi`, `gem`, `go-module`, etc.) |
+| **Vulnerability** | Vulnerability identifier (`CVE-XXXX-XXXX`, `GHSA-…`, or advisory ID) |
+| **Severity** | Severity level assigned by the data source |
+| **EPSS** | Exploit Prediction Scoring System probability and percentile |
+| **Risk** | Composite risk score derived from severity and EPSS |
+
+Example:
+
+```text
+NAME              INSTALLED  FIXED IN  TYPE  VULNERABILITY   SEVERITY  EPSS           RISK
+libssl3           3.0.13     3.0.14    deb   CVE-2024-0727   Low       < 0.1% (20th)   3.0
+curl              7.88.1     (none)    deb   CVE-2024-2379   Medium    0.1% (35th)    15.2
+```
+
+A `(won't fix)` value in **Fixed In** means the vendor has explicitly declined to issue a fix. An empty **Fixed In** means the fix state is unknown.
+
+## Severity levels
+
+Grype uses the following severity levels, from highest to lowest:
+
+| Severity | Description |
+|----------|-------------|
+| `Critical` | CVSS base score 9.0–10.0. Immediate attention required. |
+| `High` | CVSS base score 7.0–8.9. Should be addressed promptly. |
+| `Medium` | CVSS base score 4.0–6.9. Address in normal patch cycles. |
+| `Low` | CVSS base score 0.1–3.9. Low exploitability or impact. |
+| `Negligible` | Vendor-assigned; practical impact is minimal. |
+| `Unknown` | Severity data is unavailable for this vulnerability. |
+
+<Note>
+  Severity is sourced from the vulnerability database entry, which may differ from NVD CVSS scores. Distro-specific advisories (e.g. Red Hat, Debian) often assign their own severity ratings.
+</Note>
+
+## Fix states
+
+The **Fixed In** column reflects the fix state for the vulnerability:
+
+| State | Meaning |
+|-------|---------|
+| `fixed` | A patched version is available. The **Fixed In** column shows the version. |
+| `not-fixed` | No fix is available yet. The **Fixed In** column is empty. |
+| `wont-fix` | The vendor has decided not to fix this vulnerability. Displays `(won't fix)`. |
+| `unknown` | Fix status information is unavailable. The **Fixed In** column is empty. |
+
+## Filtering by fix state
+
+Show only vulnerabilities that have a fix available:
+
+```bash
+grype nginx:latest --only-fixed
+```
+
+Show only vulnerabilities that do not have a fix:
+
+```bash
+grype nginx:latest --only-notfixed
+```
+
+Ignore vulnerabilities with specific fix states using a comma-separated list:
+
+```bash
+grype nginx:latest --ignore-states wont-fix,not-fixed
+```
+
+## Normalising to CVE IDs
+
+Some vulnerability sources use vendor-specific IDs (e.g. `RHSA-2024:1234`). Use `--by-cve` to rewrite results to their canonical CVE ID when one is available:
+
+```bash
+grype nginx:latest --by-cve
+```
+
+This is useful when correlating Grype output with external trackers or dashboards that use CVE IDs.
+
+## Showing suppressed matches
+
+Grype can suppress matches based on [ignore rules](/configuration/ignore-rules) or VEX documents. These suppressed matches are excluded from output by default. Use `--show-suppressed` to include them (table output only):
+
+```bash
+grype nginx:latest --show-suppressed
+```
+
+Suppressed matches are labelled `(suppressed)` or `(suppressed by VEX)` in the table.
+
+## Sorting results
+
+Use `--sort-by` to control the order of results. The default sort is `risk`:
+
+<ParamField path="--sort-by" type="string" default="risk">
+  Sort strategy for match results. Options: `risk`, `severity`, `epss`, `kev`, `package`, `vulnerability`.
+</ParamField>
+
+```bash
+# Sort by severity (Critical first)
+grype nginx:latest --sort-by severity
+
+# Sort by EPSS percentile (most likely to be exploited first)
+grype nginx:latest --sort-by epss
+
+# Sort by KEV status (CISA Known Exploited Vulnerabilities first)
+grype nginx:latest --sort-by kev
+
+# Sort alphabetically by package name
+grype nginx:latest --sort-by package
+```
+
+## EPSS and KEV data
+
+The JSON output includes additional threat intelligence fields:
+
+**EPSS (Exploit Prediction Scoring System)** — a probability that a vulnerability will be exploited in the wild within the next 30 days, expressed as a score (0–1) and a percentile rank.
+
+**KEV (Known Exploited Vulnerabilities)** — CISA's catalog of vulnerabilities with confirmed exploitation. Matches with KEV data are highlighted in the table output with a `KEV` badge.
+
+Both fields appear in the `vulnerability` object of the JSON output:
+
+```json
+"epss": [
+  {
+    "cve": "CVE-2021-44228",
+    "epss": 0.97564,
+    "percentile": 0.99970,
+    "date": "2024-08-01"
+  }
+],
+"knownExploited": [
+  {
+    "cve": "CVE-2021-44228",
+    "vendorProject": "Apache",
+    "product": "Log4j2",
+    "dateAdded": "2021-12-10",
+    "requiredAction": "Apply updates per vendor instructions.",
+    "dueDate": "2021-12-24",
+    "knownRansomwareCampaignUse": "Known"
+  }
+]
+```
+
+## Exit codes
+
+Grype uses exit codes to communicate the outcome to CI systems:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | No vulnerabilities found at or above the configured threshold (or `--fail-on` is not set) |
+| `1` | An error occurred (bad input, failed DB load, etc.) |
+| `2` | One or more vulnerabilities were found at or above the `--fail-on` severity threshold |
+
+Use `--fail-on` to set the severity threshold that triggers exit code `2`:
+
+```bash
+# Exit 2 if any Critical or High vulnerabilities are found
+grype nginx:latest --fail-on high
+
+# Exit 2 if any vulnerability at Medium or above is found
+grype nginx:latest --fail-on medium
+```
+
+Valid severity values for `--fail-on`: `negligible`, `low`, `medium`, `high`, `critical`.
+
+<Warning>
+  When `--fail-on` is not set, Grype always exits `0` unless there is a tool error — even if vulnerabilities are found. Set `--fail-on` explicitly in CI pipelines to enforce a quality gate.
+</Warning>
+
+## Explaining a specific finding
+
+Use `grype explain` to get a detailed explanation of a specific vulnerability from a JSON scan result:
+
+```bash
+grype nginx:latest -o json | grype explain --id CVE-2024-0727
+```
+
+`grype explain` accepts Grype JSON on stdin and prints a human-readable summary of how the vulnerability was matched, including the package, matched CPE or PURL, and fix information.
+
+<Note>
+  `grype explain` is a prototype feature and its interface may change in a future release.
+</Note>

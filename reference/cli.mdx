@@ -1,0 +1,206 @@
+---
+title: "CLI Reference"
+description: "Complete reference for the grype command-line interface, including all flags, subcommands, and usage examples."
+---
+
+## grype
+
+Scan a container image, filesystem, directory, or SBOM for known vulnerabilities.
+
+**Usage**
+
+```bash
+grype [IMAGE] [flags]
+```
+
+**Description**
+
+A vulnerability scanner for container images, filesystems, and SBOMs.
+
+Grype accepts a wide variety of input sources. If no scheme prefix is provided, grype defaults to pulling from a Docker daemon.
+
+| Source scheme | Example | Description |
+|---|---|---|
+| _(none)_ | `yourrepo/yourimage:tag` | Pull from the Docker daemon (default) |
+| `podman:` | `podman:yourrepo/yourimage:tag` | Explicitly use the Podman daemon |
+| `docker:` | `docker:yourrepo/yourimage:tag` | Explicitly use the Docker daemon |
+| `docker-archive:` | `docker-archive:path/to/image.tar` | Tarball created by `docker save` |
+| `oci-archive:` | `oci-archive:path/to/image.tar` | OCI archive tarball (Podman or other) |
+| `oci-dir:` | `oci-dir:path/to/image` | OCI layout directory (e.g. from Skopeo) |
+| `singularity:` | `singularity:path/to/image.sif` | Singularity Image Format (SIF) container |
+| `dir:` | `dir:path/to/yourproject` | Any directory on disk |
+| `file:` | `file:path/to/yourfile` | Any single file on disk |
+| `sbom:` | `sbom:path/to/syft.json` | Syft JSON SBOM |
+| `registry:` | `registry:yourrepo/yourimage:tag` | Pull directly from a registry (no container runtime required) |
+| `purl:` | `purl:path/to/purl/file` | Newline-separated file of package URLs |
+| `cpes:` | `cpes:path/to/cpes/file` | Newline-separated file of package CPEs |
+| _(PURL)_ | `pkg:apk/openssl@3.2.1?distro=alpine-3.20.3` | Single package URL directly |
+| _(CPE)_ | `cpe:2.3:a:openssl:openssl:3.0.14:*:*:*:*:*:*:*` | Single CPE directly |
+
+You can also pipe Syft JSON directly:
+
+```bash
+syft yourimage:tag -o json | grype
+```
+
+---
+
+## Flags
+
+### Output
+
+<ParamField body="--output" type="string[]" default="table">
+  Report output formatter. May be specified multiple times to produce several outputs simultaneously.
+
+  Available formats: `table`, `json`, `cyclonedx`, `cyclonedx-json`, `sarif`, `template`
+
+  Deprecated formats: `embedded-cyclonedx-vex-json`, `embedded-cyclonedx-vex`
+
+  **Shorthand:** `-o`
+</ParamField>
+
+<ParamField body="--file" type="string">
+  File path to write the report output to. Defaults to stdout.
+</ParamField>
+
+<ParamField body="--pretty" type="boolean" default="false">
+  Pretty-print JSON output.
+</ParamField>
+
+<ParamField body="--template" type="string">
+  Path to a Go template file. Requires `--output template` to be set. The template has access to the full vulnerability report model.
+
+  **Shorthand:** `-t`
+</ParamField>
+
+<ParamField body="--name" type="string">
+  Set an explicit name for the target being analyzed. Used as a label in report output.
+</ParamField>
+
+<ParamField body="--sort-by" type="string" default="risk">
+  Sort the match results with the given strategy.
+
+  Options: `risk`, `severity`, `epss`, `kev`, `package`, `vulnerability`
+</ParamField>
+
+---
+
+### Scanning
+
+<ParamField body="--scope" type="string" default="squashed">
+  Which image layers to analyze.
+
+  - `squashed` — scan the final squashed filesystem (ignores intermediate layers)
+  - `all-layers` — scan every layer independently
+
+  **Shorthand:** `-s`
+</ParamField>
+
+<ParamField body="--distro" type="string">
+  Override the detected OS distribution. Use this when grype cannot auto-detect the distro, or when scanning a tarball with no OS metadata.
+
+  Format: `<distro>[-:@]<version>` — for example, `alpine:3.18` or `ubuntu@22.04`.
+</ParamField>
+
+<ParamField body="--platform" type="string">
+  Override the target platform when pulling a multi-arch container image. Examples: `linux/arm64`, `linux/arm64/v8`, `arm64`, `linux`.
+</ParamField>
+
+<ParamField body="--from" type="string[]">
+  Specify which image source behavior(s) to use. May be repeated. Examples: `docker`, `registry`, `podman`, `oci-dir`.
+</ParamField>
+
+<ParamField body="--add-cpes-if-none" type="boolean" default="false">
+  Generate CPEs for packages that have no CPE data. Useful when scanning third-party SPDX documents that omit CPEs.
+</ParamField>
+
+<ParamField body="--exclude" type="string[]">
+  Exclude paths from scanning using a glob expression. May be repeated.
+
+  Examples: `/etc/**`, `./out/**/*.json`
+</ParamField>
+
+---
+
+### Filtering
+
+<ParamField body="--fail-on" type="string">
+  Set the return code to `2` when a vulnerability is found with a severity **at or above** this value. If not set, grype always returns `0` on successful scan completion regardless of findings.
+
+  Options: `negligible`, `low`, `medium`, `high`, `critical`
+
+  **Shorthand:** `-f`
+</ParamField>
+
+<ParamField body="--only-fixed" type="boolean" default="false">
+  Ignore matches for vulnerabilities that do not have a fix available (i.e. hide `not-fixed`, `wont-fix`, and `unknown` fix-state results).
+</ParamField>
+
+<ParamField body="--only-notfixed" type="boolean" default="false">
+  Ignore matches for vulnerabilities that already have a fix available (i.e. hide `fixed` fix-state results).
+</ParamField>
+
+<ParamField body="--ignore-states" type="string">
+  Ignore matches for vulnerabilities whose fix state matches one of the given comma-separated values.
+
+  Options: `fixed`, `not-fixed`, `unknown`, `wont-fix`
+</ParamField>
+
+<ParamField body="--by-cve" type="boolean" default="false">
+  Normalize results to use the upstream CVE ID instead of the original vulnerability ID reported by the data source (e.g. show `CVE-2021-44228` instead of a distro-specific advisory ID where possible).
+</ParamField>
+
+<ParamField body="--show-suppressed" type="boolean" default="false">
+  Include suppressed/ignored vulnerability matches in the output. Only supported with the `table` output format.
+</ParamField>
+
+---
+
+### VEX
+
+<ParamField body="--vex" type="string[]">
+  Paths to VEX (Vulnerability Exploitability eXchange) documents to apply when producing scan results. When any VEX document is provided, vulnerabilities listed as `fixed` or `not_affected` are automatically suppressed.
+</ParamField>
+
+---
+
+## Subcommands
+
+### grype explain
+
+Ask grype to explain a set of vulnerability findings from a prior scan.
+
+<Warning>
+  `grype explain` is a prototype feature and is subject to change.
+</Warning>
+
+**Usage**
+
+```bash
+grype -o json <IMAGE> | grype explain --id <VULN_ID> [--id <VULN_ID> ...]
+```
+
+`grype explain` reads a grype JSON report from stdin and provides a detailed explanation of one or more specified vulnerabilities — including the matched package, the detection path, and why it was flagged.
+
+**Flags**
+
+<ParamField body="--id" type="string[]" required>
+  One or more vulnerability IDs to explain. May be repeated.
+</ParamField>
+
+**Example**
+
+```bash
+# Scan and explain CVE-2021-44228 in one pipeline
+grype -o json nginx:latest | grype explain --id CVE-2021-44228
+```
+
+---
+
+### grype db
+
+Manage the local vulnerability database. See the [Database Commands](/reference/db-commands) reference for the full list of subcommands.
+
+```bash
+grype db <subcommand> [flags]
+```

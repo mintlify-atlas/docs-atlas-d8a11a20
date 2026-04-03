@@ -1,0 +1,209 @@
+---
+title: "Exit Codes"
+description: "Reference for all grype exit codes and how to use them in shell scripts and CI/CD pipelines."
+---
+
+Grype uses three distinct exit codes so that callers can programmatically distinguish between a clean scan, a policy violation, and a tool error.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Scan completed successfully. No vulnerabilities found at or above the `--fail-on` threshold (or `--fail-on` was not set). |
+| `1` | Tool error — grype could not complete the scan. See [Exit code 1](#exit-code-1-tool-error) for details. |
+| `2` | Vulnerabilities found at or above the `--fail-on` severity threshold. See [Exit code 2](#exit-code-2-vulnerabilities-at-or-above-threshold). |
+
+---
+
+## Exit code 0 — success
+
+Grype exits `0` when the scan completes without errors **and** either:
+
+- `--fail-on` was not set, or
+- No vulnerabilities were found at or above the specified severity.
+
+<Note>
+  Without `--fail-on`, finding vulnerabilities does **not** cause a non-zero exit. Grype exits `0` even if thousands of CVEs are found. You must set `--fail-on` to gate on severity.
+</Note>
+
+```bash
+# Exits 0 — scan succeeded, no --fail-on configured
+grype nginx:latest
+
+# Exits 0 — scan succeeded, no HIGH or CRITICAL found
+grype --fail-on high nginx:latest
+```
+
+---
+
+## Exit code 1 — tool error
+
+Grype exits `1` when it encounters an unrecoverable error that prevented the scan from completing. Common causes include:
+
+- Invalid arguments or flag values (e.g. unrecognised `--fail-on` severity, bad `--scope` value)
+- Database load failure (corrupt DB, missing DB, checksum mismatch)
+- Network error when pulling an image or downloading the database
+- Failure to parse the input source
+- Template rendering errors when using `--output template`
+
+```bash
+grype --fail-on notavalidseverity nginx:latest
+# Error: bad --fail-on severity value 'notavalidseverity'
+# Exit code: 1
+```
+
+<Tip>
+  If you see `Database checksum invalid`, run `grype db delete` followed by `grype db update` to recover.
+</Tip>
+
+---
+
+## Exit code 2 — vulnerabilities at or above threshold
+
+Grype exits `2` when `--fail-on` is set **and** at least one vulnerability was found with a severity **at or equal to** the specified level.
+
+```bash
+grype --fail-on critical nginx:latest
+# [shows vulnerability table]
+# Exit code: 2  (if any CRITICAL found)
+```
+
+<Warning>
+  Exit code `2` is only possible when `--fail-on` is configured. Without that flag, grype always returns `0` on a successful scan — no matter how many vulnerabilities are found.
+</Warning>
+
+### Severity ordering
+
+The `--fail-on` threshold applies to this ordered scale (lowest to highest):
+
+```
+negligible < low < medium < high < critical
+```
+
+Setting `--fail-on medium` causes exit code `2` for any finding at `medium`, `high`, or `critical` severity.
+
+---
+
+## Handling exit codes in shell scripts
+
+<CodeGroup>
+
+```bash Basic check
+#!/usr/bin/env bash
+set -e
+
+grype --fail-on high "$IMAGE"
+```
+
+```bash Handle all three codes
+#!/usr/bin/env bash
+
+IMAGE="${1:?Usage: $0 <image>}"
+
+grype --fail-on high "$IMAGE"
+EXIT_CODE=$?
+
+case $EXIT_CODE in
+  0)
+    echo "Scan passed: no vulnerabilities at or above HIGH severity."
+    ;;
+  1)
+    echo "ERROR: grype encountered a tool error. Check the output above." >&2
+    exit 1
+    ;;
+  2)
+    echo "FAIL: vulnerabilities found at or above HIGH severity." >&2
+    exit 2
+    ;;
+esac
+```
+
+```bash Capture exit code without set -e
+#!/usr/bin/env bash
+
+grype --fail-on medium my-app:latest || {
+  EXIT_CODE=$?
+  if [ "$EXIT_CODE" -eq 2 ]; then
+    echo "Vulnerabilities found — failing build." >&2
+    exit 2
+  else
+    echo "Grype tool error (exit $EXIT_CODE)." >&2
+    exit 1
+  fi
+}
+
+echo "No vulnerabilities at medium or above."
+```
+
+</CodeGroup>
+
+---
+
+## Using exit codes in CI/CD
+
+### GitHub Actions
+
+```yaml
+- name: Scan image for vulnerabilities
+  run: grype --fail-on high ${{ env.IMAGE_TAG }}
+  # Step fails automatically on exit code 1 or 2;
+  # workflow continues only when exit code is 0.
+```
+
+### GitLab CI
+
+```yaml
+vulnerability-scan:
+  image: anchore/grype:latest
+  script:
+    - grype --fail-on critical $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  allow_failure: false   # fail the pipeline on exit 1 or 2
+```
+
+### Jenkins
+
+```groovy
+stage('Vulnerability Scan') {
+    steps {
+        script {
+            def exitCode = sh(
+                script: "grype --fail-on high ${IMAGE_TAG}",
+                returnStatus: true
+            )
+            if (exitCode == 2) {
+                error("Vulnerabilities found at or above HIGH severity")
+            } else if (exitCode != 0) {
+                error("grype encountered an error (exit ${exitCode})")
+            }
+        }
+    }
+}
+```
+
+### Makefile
+
+```makefile
+.PHONY: scan
+scan:
+	grype --fail-on high $(IMAGE); \
+	EXIT=$$?; \
+	if [ $$EXIT -eq 2 ]; then echo "Vulnerabilities found"; exit 2; fi; \
+	if [ $$EXIT -ne 0 ]; then echo "Scan error"; exit 1; fi
+```
+
+---
+
+## Exit code 2 vs exit code 1 — quick reference
+
+| Scenario | Exit code |
+|---|---|
+| Scan completed, no `--fail-on` set | `0` |
+| Scan completed, findings below threshold | `0` |
+| Scan completed, findings **at or above** `--fail-on` threshold | `2` |
+| Invalid `--fail-on` value (e.g. `notavalue`) | `1` |
+| Database could not be loaded | `1` |
+| Image could not be pulled or parsed | `1` |
+| Network timeout downloading the database | `1` |
+| `--fail-on` not set, even with many findings | `0` |
+
+<Note>
+  `grype db check` uses a slightly different convention: it exits `1` (not `2`) when a database upgrade is available, since that is informational rather than a vulnerability gate.
+</Note>

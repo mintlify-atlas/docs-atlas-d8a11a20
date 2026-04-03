@@ -1,80 +1,153 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Run your first Grype vulnerability scan, read the output table, and learn how to fail builds on high-severity findings."
 ---
 
-## Get started in three steps
+This guide walks you through installing Grype, running your first scan, understanding the output, and using key flags to integrate Grype into your workflow.
 
-Get your documentation site running locally and make your first customization.
+## Run your first scan
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install Grype">
+    Install the latest release with the install script:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+    ```
 
-### Step 2: Deploy your changes
+    Confirm the installation:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    grype version
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    See [Installation](/installation) for Homebrew, Docker, Chocolatey, and other options.
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Scan a container image">
+    Point Grype at any container image by name. Grype pulls it from the Docker daemon (or a registry if not found locally):
 
-### Step 3: Go live
+    ```bash
+    grype alpine:latest
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    Grype will:
+    1. Download and cache the vulnerability database (first run only).
+    2. Catalog all packages in the image using Syft.
+    3. Match packages against the database.
+    4. Print a results table to stdout.
+  </Step>
+
+  <Step title="Read the output">
+    Grype prints a table with one row per vulnerability match:
+
+    ```
+    NAME          INSTALLED  FIXED-IN  TYPE  VULNERABILITY   SEVERITY
+    libssl3       3.1.4-r2   3.1.4-r5  apk   CVE-2024-0727   Medium
+    busybox       1.36.1-r2  1.36.1-r5 apk   CVE-2023-42363  Medium
+    ssl_client    1.36.1-r2  1.36.1-r5 apk   CVE-2023-42363  Medium
+    ```
+
+    | Column | Description |
+    |---|---|
+    | `NAME` | Package name affected by the vulnerability |
+    | `INSTALLED` | Version currently installed in the scanned target |
+    | `FIXED-IN` | Version that contains the fix (`(none)` if no fix is available) |
+    | `TYPE` | Package type (e.g., `apk`, `deb`, `rpm`, `python`, `java-archive`) |
+    | `VULNERABILITY` | CVE or advisory ID |
+    | `SEVERITY` | Severity rating: `Negligible`, `Low`, `Medium`, `High`, or `Critical` |
+  </Step>
+
+  <Step title="Scan more target types">
+    Grype accepts many input types beyond image names:
+
+    ```bash
+    # Scan Ubuntu 20.04
+    grype ubuntu:20.04
+
+    # Scan a local directory
+    grype dir:./my-project
+
+    # Scan an SBOM file
+    grype sbom:./sbom.json
+
+    # Pipe a Syft SBOM into Grype
+    syft alpine:latest -o json | grype
+    ```
+
+    <Tip>
+      Scanning an SBOM with `grype sbom:` or piping from Syft skips the cataloging step, making it the fastest way to scan targets you've already inventoried.
+    </Tip>
+  </Step>
+
+  <Step title="Fail on high-severity findings">
+    Use `--fail-on` (short flag: `-f`) to exit with code `2` when Grype finds vulnerabilities at or above a given severity. This is the standard way to block CI/CD pipelines:
+
+    ```bash
+    grype alpine:latest --fail-on high
+    ```
+
+    Valid severity values are: `negligible`, `low`, `medium`, `high`, `critical`.
+
+    ```bash
+    # Fail on critical only
+    grype ubuntu:20.04 --fail-on critical
+
+    # Fail on medium and above
+    grype dir:./my-project --fail-on medium
+    ```
+
+    <Note>
+      Exit code `0` means no vulnerabilities at or above the threshold were found. Exit code `2` means the threshold was exceeded. Exit code `1` means an error occurred.
+    </Note>
+  </Step>
+</Steps>
+
+## Output formats
+
+By default Grype prints a human-readable table. Use `-o` to select a different format:
+
+```bash
+# JSON output (machine-readable)
+grype alpine:latest -o json
+
+# CycloneDX JSON (for SBOM tooling)
+grype alpine:latest -o cyclonedx-json
+
+# SARIF (for GitHub Code Scanning and IDE integrations)
+grype alpine:latest -o sarif
+
+# Write output to a file instead of stdout
+grype alpine:latest -o json --file results.json
+```
+
+Available formats: `table`, `json`, `cyclonedx`, `cyclonedx-json`, `sarif`, `template`.
+
+## Common flags
+
+| Flag | Description |
+|---|---|
+| `-o FORMAT` | Output format (default: `table`) |
+| `-f SEVERITY` | Exit with code 2 if any match meets or exceeds this severity |
+| `--only-fixed` | Show only vulnerabilities that have a fix available |
+| `--by-cve` | Group results by CVE ID instead of advisory ID |
+| `--show-suppressed` | Include ignored matches in table output |
+| `--platform PLATFORM` | Override the target platform (e.g., `linux/arm64`) |
+| `-s SCOPE` | Layer scope: `squashed` (default) or `all-layers` |
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Scan targets" icon="crosshairs" href="/scanning/scan-targets">
+    See all supported input formats including PURLs, CPEs, and OCI archives.
+  </Card>
+  <Card title="Output formats" icon="file-export" href="/scanning/output-formats">
+    Learn how to use JSON, CycloneDX, SARIF, and custom templates.
+  </Card>
+  <Card title="Ignore rules" icon="filter" href="/configuration/ignore-rules">
+    Suppress false positives with fine-grained ignore rules.
+  </Card>
+  <Card title="CI/CD integration" icon="infinity" href="/guides/ci-cd-integration">
+    Add Grype to GitHub Actions and other CI pipelines.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

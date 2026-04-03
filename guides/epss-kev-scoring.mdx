@@ -1,0 +1,168 @@
+---
+title: "EPSS and KEV scoring"
+description: "Use EPSS probability scores and the CISA KEV catalog to prioritize which vulnerabilities to fix first."
+---
+
+Not all vulnerabilities are equally likely to be exploited. Grype enriches scan results with two data sources that help you prioritize remediation beyond severity ratings alone: EPSS and the CISA Known Exploited Vulnerabilities (KEV) catalog.
+
+## What is EPSS?
+
+The [Exploit Prediction Scoring System (EPSS)](https://www.first.org/epss/) is a model that estimates the probability that a CVE will be exploited in the wild within the next 30 days. It produces two values:
+
+- **`epss`** — a probability between `0.0` and `1.0` (e.g. `0.0087` = 0.87% chance of exploitation)
+- **`percentile`** — where this CVE ranks relative to all scored CVEs (e.g. `0.93` = higher exploitation probability than 93% of all CVEs)
+
+EPSS is updated daily by FIRST.org using real-world exploitation data.
+
+## What is KEV?
+
+The [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) is a list maintained by the US Cybersecurity and Infrastructure Security Agency. Every entry represents a CVE that has been actively exploited in the wild.
+
+Presence in KEV is a binary signal: either a CVE is known to have been actively exploited, or it is not. CISA also provides remediation due dates for federal agencies, but the catalog is widely used by all organizations as a prioritization signal.
+
+## EPSS and KEV in Grype output
+
+Both EPSS and KEV data appear in the JSON output under each vulnerability match.
+
+```json
+{
+  "vulnerability": {
+    "id": "CVE-2021-44228",
+    "severity": "Critical",
+    "epss": [
+      {
+        "cve": "CVE-2021-44228",
+        "epss": 0.97565,
+        "percentile": 0.99976,
+        "date": "2024-11-01"
+      }
+    ],
+    "knownExploited": [
+      {
+        "cve": "CVE-2021-44228",
+        "vendorProject": "Apache",
+        "product": "Log4j2",
+        "dateAdded": "2021-12-10",
+        "requiredAction": "Apply updates per vendor instructions.",
+        "dueDate": "2021-12-24",
+        "knownRansomwareCampaignUse": "Known",
+        "notes": "",
+        "urls": [
+          "https://logging.apache.org/log4j/2.x/security.html"
+        ]
+      }
+    ],
+    "fix": {
+      "versions": ["2.15.0"],
+      "state": "fixed"
+    }
+  },
+  "artifact": {
+    "name": "log4j-core",
+    "version": "2.14.1",
+    "type": "java-archive"
+  }
+}
+```
+
+### EPSS fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cve` | string | CVE identifier |
+| `epss` | float | Exploitation probability (0.0–1.0) |
+| `percentile` | float | Rank relative to all EPSS-scored CVEs (0.0–1.0) |
+| `date` | string | Date the score was last updated |
+
+### KEV fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cve` | string | CVE identifier |
+| `vendorProject` | string | Affected vendor or project |
+| `product` | string | Affected product |
+| `dateAdded` | string | Date added to the KEV catalog |
+| `requiredAction` | string | CISA's remediation guidance |
+| `dueDate` | string | Federal remediation due date |
+| `knownRansomwareCampaignUse` | string | `"Known"` or `"Unknown"` |
+| `urls` | []string | Reference URLs |
+
+## Prioritization strategy
+
+Use EPSS and KEV together with severity to build a tiered remediation approach:
+
+| Condition | Action |
+|-----------|--------|
+| In KEV catalog | Fix immediately — this CVE is actively exploited |
+| Critical or High severity + EPSS > 0.1 | Fix in the current sprint |
+| Critical or High severity + no fix available | Monitor; implement mitigating controls |
+| Medium severity + high EPSS percentile (> 0.90) | Schedule for next sprint |
+| Low or Negligible severity + not in KEV | Accept or defer |
+
+<Warning>
+Severity alone is insufficient for prioritization. A Medium-severity CVE with an EPSS score of `0.95` and a KEV entry is more immediately dangerous than a Critical CVE with no public exploit.
+</Warning>
+
+## Using EPSS and KEV in custom templates
+
+You can access EPSS and KEV data directly in [custom output templates](/guides/custom-templates).
+
+### Flag KEV entries
+
+```
+{{- range .Matches }}
+{{- if .Vulnerability.KnownExploited }}
+[ACTIVELY EXPLOITED] {{ .Vulnerability.ID }} — {{ .Artifact.Name }}@{{ .Artifact.Version }}
+  Added to KEV: {{ (index .Vulnerability.KnownExploited 0).DateAdded }}
+{{- end }}
+{{- end }}
+```
+
+### Show EPSS scores above a threshold
+
+```
+{{- range .Matches }}
+{{- range .Vulnerability.EPSS }}
+{{- if gt .EPSS 0.1 }}
+{{ $.Vulnerability.ID }}: EPSS={{ .EPSS | printf "%.4f" }} ({{ .Percentile | printf "%.0f%%" }} percentile)
+{{- end }}
+{{- end }}
+{{- end }}
+```
+
+### Combined prioritization report
+
+```
+# High-priority vulnerabilities
+
+{{- range .Matches }}
+{{- $hasKEV := gt (len .Vulnerability.KnownExploited) 0 }}
+{{- $highSeverity := or (eq .Vulnerability.Severity "Critical") (eq .Vulnerability.Severity "High") }}
+{{- if or $hasKEV $highSeverity }}
+## {{ .Vulnerability.ID }} ({{ .Vulnerability.Severity }})
+- Package: {{ .Artifact.Name }} {{ .Artifact.Version }}
+- Fix state: {{ .Vulnerability.Fix.State }}
+{{- if .Vulnerability.Fix.Versions }}
+- Fix version: {{ index .Vulnerability.Fix.Versions 0 }}
+{{- end }}
+{{- if $hasKEV }}
+- **IN KEV** — added {{ (index .Vulnerability.KnownExploited 0).DateAdded }}
+{{- end }}
+{{- range .Vulnerability.EPSS }}
+- EPSS: {{ .EPSS }} ({{ .Percentile | printf "%.1f" }} percentile)
+{{- end }}
+{{- end }}
+{{- end }}
+```
+
+## Understanding the scores
+
+**EPSS is a probability, not a verdict.** A score of `0.05` means a 5% chance of exploitation in the next 30 days — low in absolute terms, but still meaningful for a high-severity vulnerability in a public-facing service. Use the percentile to understand relative risk across your vulnerability inventory.
+
+**KEV is definitive.** If a CVE is in the KEV catalog, it has been exploited. Treat KEV entries as the highest priority in your remediation queue regardless of CVSS score.
+
+**Scores change over time.** EPSS updates daily as new exploitation data arrives. A CVE that scores low today may score higher next week if a public exploit is released. Re-scan regularly rather than treating a one-time scan as permanent.
+
+<Tip>
+Combine `--output json` with a script or custom template to extract and sort vulnerabilities by EPSS score, giving you a prioritized remediation list automatically.
+</Tip>

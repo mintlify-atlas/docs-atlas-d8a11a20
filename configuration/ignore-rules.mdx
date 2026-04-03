@@ -1,0 +1,282 @@
+---
+title: "Ignore rules"
+description: "Suppress specific vulnerability matches from Grype scan results using ignore rules."
+---
+
+Ignore rules let you suppress vulnerability matches that you have accepted, mitigated, or know to be false positives. When a rule applies to a match, that match is moved out of the results and into the suppressed list rather than being dropped entirely.
+
+All fields in a rule are optional, but at least one must be set. A rule applies only when **every specified field** matches the vulnerability match.
+
+## Configuration
+
+Add ignore rules to your config file under the `ignore` key:
+
+```yaml
+ignore:
+  - vulnerability: CVE-2023-1234
+    reason: "Mitigated by WAF rules"
+    package:
+      name: libssl
+      type: deb
+```
+
+Or pass them inline using `--ignore-states` for fix-state-based filtering:
+
+```bash
+# Ignore all vulnerabilities with no available fix
+grype alpine:latest --only-fixed
+```
+
+## Viewing suppressed matches
+
+By default, suppressed matches are hidden. Use `--show-suppressed` to include them in table output:
+
+```bash
+grype alpine:latest --show-suppressed
+```
+
+<Note>
+`--show-suppressed` is only supported with the `table` output format.
+</Note>
+
+## Rule fields
+
+<AccordionGroup>
+
+  <Accordion title="vulnerability">
+    The CVE ID or advisory ID of the vulnerability to ignore.
+
+    ```yaml
+    ignore:
+      - vulnerability: CVE-2021-44228
+    ```
+
+    Matches the exact vulnerability ID reported by Grype. Use `include-aliases` to also match aliased IDs.
+  </Accordion>
+
+  <Accordion title="include-aliases">
+    When `true`, the rule also applies when the vulnerability ID appears as an alias (related vulnerability) of the matched vulnerability. Useful when the same flaw is tracked under both a CVE and a vendor advisory.
+
+    ```yaml
+    ignore:
+      - vulnerability: CVE-2021-44228
+        include-aliases: true
+    ```
+  </Accordion>
+
+  <Accordion title="reason">
+    A human-readable explanation for why the match is being ignored. This field is for documentation only and does not affect matching.
+
+    ```yaml
+    ignore:
+      - vulnerability: CVE-2023-1234
+        reason: "Risk accepted by security team on 2024-01-15"
+    ```
+  </Accordion>
+
+  <Accordion title="namespace">
+    The vulnerability database namespace the match must come from. Common namespaces include `nvd`, `github:language:python`, `debian:distro:debian:12`, etc.
+
+    ```yaml
+    ignore:
+      - namespace: github:language:python
+    ```
+
+    This is useful when the same CVE is reported from multiple sources and you only want to suppress one source.
+  </Accordion>
+
+  <Accordion title="fix-state">
+    Ignore matches based on the fix availability state of the vulnerability.
+
+    Allowed values: `fixed`, `not-fixed`, `wont-fix`, `unknown`
+
+    ```yaml
+    ignore:
+      # Suppress all vulnerabilities that will never be fixed upstream
+      - fix-state: wont-fix
+
+      # Suppress vulnerabilities with no fix information
+      - fix-state: unknown
+    ```
+
+    <Tip>
+    You can also use `--only-fixed` or `--only-notfixed` as CLI flags to apply global fix-state filtering without editing the config file.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="package.name">
+    The name of the package to match. Supports Go regular expressions.
+
+    ```yaml
+    ignore:
+      # Exact name match
+      - package:
+          name: libcurl
+
+      # Regex: any package starting with "openssl"
+      - package:
+          name: "openssl.*"
+    ```
+
+    Plain strings are matched exactly. A string containing regex metacharacters (e.g. `*`, `+`, `[`, `(`) is treated as a regular expression anchored to the full package name.
+  </Accordion>
+
+  <Accordion title="package.version">
+    The exact version string of the package to match.
+
+    ```yaml
+    ignore:
+      - package:
+          name: curl
+          version: "7.68.0"
+    ```
+  </Accordion>
+
+  <Accordion title="package.language">
+    The programming language ecosystem of the package.
+
+    ```yaml
+    ignore:
+      - package:
+          language: python
+    ```
+
+    Common values: `python`, `javascript`, `java`, `go`, `ruby`, `rust`, `dotnet`
+  </Accordion>
+
+  <Accordion title="package.type">
+    The package type as classified by Syft.
+
+    ```yaml
+    ignore:
+      - package:
+          type: npm
+
+      - package:
+          type: java-archive
+    ```
+
+    Common values: `npm`, `gem`, `python`, `go-module`, `java-archive`, `deb`, `rpm`, `apk`, `cargo`
+  </Accordion>
+
+  <Accordion title="package.location">
+    A glob pattern matched against the file path(s) where the package was found. Supports double-star (`**`) globbing.
+
+    ```yaml
+    ignore:
+      # Ignore matches for packages found under /usr/local/lib
+      - package:
+          location: "/usr/local/lib/**"
+
+      # Ignore matches in a specific node_modules directory
+      - package:
+          location: "**/node_modules/lodash/**"
+    ```
+  </Accordion>
+
+  <Accordion title="package.upstream-name">
+    The name of the upstream source package. Useful for distro packages where the binary package name differs from the source package name. Supports Go regular expressions.
+
+    ```yaml
+    ignore:
+      # Ignore all packages whose upstream source is "openssl"
+      - package:
+          upstream-name: openssl
+    ```
+  </Accordion>
+
+  <Accordion title="match-type">
+    The type of match that produced the vulnerability result.
+
+    ```yaml
+    ignore:
+      - match-type: cpe-match
+    ```
+
+    Common values: `exact-direct-match`, `exact-indirect-match`, `cpe-match`
+  </Accordion>
+
+  <Accordion title="vex-status">
+    Ignore matches based on the VEX status associated with the vulnerability. This field is used in conjunction with loaded VEX documents.
+
+    Allowed values: `not_affected`, `fixed`, `affected`, `under_investigation`
+
+    ```yaml
+    ignore:
+      - vex-status: not_affected
+
+      - vex-status: fixed
+    ```
+
+    See [VEX Support](/configuration/vex) for more details on how VEX rules interact with ignore rules.
+  </Accordion>
+
+  <Accordion title="vex-justification">
+    Further refines `vex-status: not_affected` rules by requiring a specific justification from the VEX document.
+
+    Allowed values:
+    - `component_not_present`
+    - `vulnerable_code_not_in_execute_path`
+    - `vulnerable_code_not_present`
+    - `vulnerable_code_cannot_be_controlled_by_adversary`
+    - `inline_mitigations_already_exist`
+
+    ```yaml
+    ignore:
+      - vex-status: not_affected
+        vex-justification: vulnerable_code_not_present
+    ```
+  </Accordion>
+
+</AccordionGroup>
+
+## Examples
+
+### Ignore a specific CVE across all packages
+
+```yaml
+ignore:
+  - vulnerability: CVE-2021-44228
+    reason: "Log4Shell - not exploitable in our deployment"
+```
+
+### Ignore a CVE only for a specific package
+
+```yaml
+ignore:
+  - vulnerability: CVE-2023-1234
+    package:
+      name: libssl
+      type: deb
+```
+
+### Ignore vulnerabilities with no fix in a specific path
+
+```yaml
+ignore:
+  - fix-state: not-fixed
+    package:
+      location: "/usr/local/lib/node_modules/**"
+```
+
+### Ignore all vulnerabilities in test dependencies
+
+```yaml
+ignore:
+  - package:
+      location: "**/test/**"
+    reason: "Test dependencies not shipped to production"
+```
+
+### Combined rule with multiple conditions
+
+```yaml
+ignore:
+  - vulnerability: CVE-2022-9999
+    package:
+      name: curl
+      version: "7.68.0"
+      type: deb
+    fix-state: wont-fix
+    reason: "Vendor will not fix; mitigated at network layer"
+```

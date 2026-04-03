@@ -1,0 +1,256 @@
+---
+title: "Supported OS package ecosystems"
+description: "OS package managers and Linux distributions supported by Grype, including matching strategies and configuration options."
+keywords: ["grype", "os packages", "linux", "alpine", "debian", "ubuntu", "rpm", "rhel", "fedora", "arch", "gentoo", "windows", "wolfi", "chainguard"]
+---
+
+Grype scans packages installed by OS package managers. When you scan a container image or filesystem, Grype detects the Linux distribution and matches installed packages against distro-specific vulnerability advisories, supplemented by NVD/CPE data where applicable.
+
+## Supported distributions
+
+| Distribution | Package format | Grype package type | Advisory source |
+|---|---|---|---|
+| Alpine Linux | APK | `apk` | Alpine SecDB + NVD |
+| Debian | DEB | `deb` | Debian Security Tracker |
+| Ubuntu | DEB | `deb` | Ubuntu Security Notices |
+| Raspbian | DEB | `deb` | Debian Security Tracker |
+| Red Hat Enterprise Linux (RHEL) | RPM | `rpm` | Red Hat CVE database |
+| CentOS | RPM | `rpm` | Red Hat CVE database |
+| Fedora | RPM | `rpm` | Red Hat CVE database |
+| Amazon Linux | RPM | `rpm` | Amazon Linux Security Advisories |
+| Oracle Linux | RPM | `rpm` | Oracle Linux ELSA |
+| Rocky Linux | RPM | `rpm` | Rocky Linux advisories |
+| AlmaLinux | RPM | `rpm` | ALSA + RHEL (filtered) |
+| SUSE Linux Enterprise | RPM | `rpm` | SUSE OVAL |
+| openSUSE Leap | RPM | `rpm` | SUSE OVAL |
+| VMware Photon OS | RPM | `rpm` | Photon advisories |
+| Azure Linux (CBL-Mariner) | RPM | `rpm` | MSRC / Azure advisories |
+| Arch Linux | ALPM | `alpm` | Arch Linux Security Tracker |
+| Gentoo | Portage | `portage` | GLSA |
+| Wolfi | APK | `apk` | Wolfi SecDB + NVD |
+| Chainguard | APK | `apk` | Chainguard SecDB + NVD |
+| Windows | KB patch | `msrc-kb` | Microsoft Security Response Center |
+
+<Note>
+Grype reads the `/etc/os-release` file inside container images and filesystems to determine the distribution. When scanning raw tarballs or directories that do not contain this file, you must specify the distribution with `--distro`.
+</Note>
+
+## The `--distro` flag
+
+When Grype cannot detect the distribution automatically — for example, when scanning a filesystem tarball or a directory that lacks `/etc/os-release` — use the `--distro` flag to tell Grype which distribution to match against:
+
+```bash
+grype dir:./rootfs --distro alpine:3.19
+grype sbom:packages.spdx --distro ubuntu:22.04
+grype dir:./rpm-root --distro rhel:9.4
+```
+
+The format is `<distro>:<version>`. The distro identifier matches the `ID` field from `/etc/os-release` (for example, `alpine`, `ubuntu`, `rhel`, `fedora`, `amzn`).
+
+Without `--distro`, Grype may fall back to CPE-based matching or produce no results for packages that require distro-aware advisories.
+
+## Ecosystem details
+
+<AccordionGroup>
+  <Accordion title="Alpine Linux">
+
+**Package type:** `apk`  
+**Package manager:** `apk`  
+**Distro IDs:** `alpine`, `wolfi`, `chainguard`
+
+The APK matcher uses two data sources:
+
+1. **Alpine SecDB** (authoritative): distro-specific advisories that record exact fixed versions for each Alpine release branch.
+2. **NVD / CPE** (supplementary): CVEs from the National Vulnerability Database when no SecDB record exists for the CVE.
+
+When a CVE appears in both sources, the SecDB record takes precedence. If the SecDB entry shows the package version is at or above the fixed version, the CPE match is suppressed to avoid false positives.
+
+The matcher also processes **NAK entries** — SecDB records that explicitly mark a package as not vulnerable to a specific CVE on a given Alpine release — and uses them to suppress matching CPE records for co-located packages (for example, a Python binary catalogued alongside the `python3` APK).
+
+Wolfi and Chainguard use the same APK matcher with their own SecDB feeds.
+
+  </Accordion>
+
+  <Accordion title="Debian and Ubuntu">
+
+**Package type:** `deb`  
+**Package manager:** `apt` / `dpkg`  
+**Distro IDs:** `debian`, `ubuntu`, `raspbian`
+
+The dpkg matcher searches for vulnerabilities using:
+
+- The package name and version against the distro's advisory feed.
+- The **source package** name (from the `Source:` field in `dpkg` metadata), which allows matches against advisories that reference the upstream source rather than the binary package.
+
+**Epoch handling**
+
+Debian versions can include an epoch (for example, `1:2.4.52-1`). When a package's installed version has no epoch but the advisory's constraint does, Grype must decide how to interpret the comparison. Two strategies are available:
+
+| Strategy | Behaviour |
+|---|---|
+| `zero` (default for dpkg) | Treat missing epoch as `0`. Follows dpkg specification. May produce false positives when a non-zero epoch was later assigned. |
+| `auto` | Assume the missing epoch matches the constraint's epoch. Reduces false positives in distros that rarely track multiple epochs for the same package in the same release. |
+
+Configure the strategy in `~/.grype.yaml`:
+
+```yaml
+match:
+  dpkg:
+    missing-epoch-strategy: zero  # or: auto
+```
+
+**End-of-life distros**
+
+When a Debian or Ubuntu release reaches end-of-life, distro advisory data is no longer updated. Enable CPE-based fallback matching to continue finding vulnerabilities from NVD data:
+
+```yaml
+match:
+  dpkg:
+    use-cpes-for-eol: false  # set to true to enable CPE fallback for EOL distros
+```
+
+  </Accordion>
+
+  <Accordion title="Red Hat family (RHEL, CentOS, Fedora, Amazon Linux, Oracle Linux)">
+
+**Package type:** `rpm`  
+**Package manager:** `rpm` / `yum` / `dnf`  
+**Distro IDs:** `rhel`, `centos`, `fedora`, `amzn`, `ol`, `scientific`, `rocky`, `sles`, `opensuse-leap`, `photon`, `mariner`, `azurelinux`
+
+The RPM matcher searches for vulnerabilities by:
+
+1. The binary package name and version against the distro's advisory data.
+2. The **source RPM** name (from the `sourceRPM` field), which allows matches against advisories that reference the source package.
+
+**Epoch handling**
+
+RPM versions include an epoch component (for example, `4:5.26.3-419.el8`). For direct binary package matches, Grype always treats a missing epoch as `0`, consistent with RPM specification guidance. For source RPM comparisons, epoch may be omitted in the `sourceRPM` field even when a non-zero epoch exists, so a different strategy may be appropriate:
+
+| Strategy | Behaviour |
+|---|---|
+| `zero` | Treat missing epoch as `0`. Risk of false positives on source RPM comparisons. |
+| `auto` (default for rpm) | Assume missing epoch matches the constraint's epoch. Recommended for most cases. |
+
+```yaml
+match:
+  rpm:
+    missing-epoch-strategy: auto  # or: zero
+```
+
+**AlmaLinux**
+
+AlmaLinux uses a specialised matching flow. Grype first finds disclosures from RHEL advisory data (treating AlmaLinux as RHEL-compatible), then filters those results using AlmaLinux Security Advisories (ALSA) unaffected records. This approach provides accurate results when AlmaLinux explicitly patches or dismisses a RHEL advisory.
+
+**End-of-life distros**
+
+Enable CPE-based fallback matching for EOL RPM-based distros:
+
+```yaml
+match:
+  rpm:
+    use-cpes-for-eol: false  # set to true to enable CPE fallback for EOL distros
+```
+
+  </Accordion>
+
+  <Accordion title="Red Hat Extended Update Support (EUS)">
+
+**Applies to:** RHEL 8.0 and later  
+**Channel name:** `eus`
+
+Red Hat Extended Update Support provides security fixes on a separate branch tied to a specific minor RHEL release (for example, RHEL 9.4-EUS), allowing subscribers to stay on that minor version longer without upgrading to the next minor release.
+
+When Grype detects an EUS subscription from SBOM metadata, it activates EUS-aware matching:
+
+1. **Find disclosures** from the base RHEL major version advisory data (for example, all RHEL 9.x disclosures).
+2. **Find fixes** from both the base major version and the specific EUS minor version channel (for example, 9.4-EUS).
+3. **Merge** disclosures and fixes, then filter out fixes that are not reachable for the pinned EUS minor version.
+
+A fix is reachable for an EUS version if its release tag (for example, `.el9_4`) has a minor version number less than or equal to the EUS minor version. Fixes targeting a newer minor version (for example, `.el9_5`) are excluded and the vulnerability is reported as `not-fixed` for the EUS subscriber.
+
+Configure EUS channel behaviour in `~/.grype.yaml`:
+
+```yaml
+fix-channel:
+  redhat-eus:
+    apply: auto     # auto (detect from SBOM), always, or never
+    versions: ">= 8"
+```
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Activate EUS matching only when SBOM data indicates an EUS subscription |
+| `always` | Always apply EUS matching for RHEL 8+ |
+| `never` | Disable EUS matching entirely |
+
+  </Accordion>
+
+  <Accordion title="Arch Linux">
+
+**Package type:** `alpm`  
+**Package manager:** `pacman`  
+**Distro ID:** `arch`
+
+The Arch Linux matcher uses distro advisory data from the Arch Linux Security Tracker. Packages are matched by name and version against the distro feed. No CPE fallback is applied by default.
+
+  </Accordion>
+
+  <Accordion title="Gentoo">
+
+**Package type:** `portage`  
+**Package manager:** `portage` / `emerge`  
+**Distro ID:** `gentoo`
+
+The Portage matcher uses Gentoo Linux Security Advisories (GLSA) data. Packages are matched by name and version. Gentoo does not use epochs in package versions.
+
+  </Accordion>
+
+  <Accordion title="Windows">
+
+**Package type:** `msrc-kb`  
+**Distro ID:** `windows`
+
+Windows vulnerability matching is done at the **KB patch level** rather than at the package level. Grype treats installed KB patches as "packages" and matches them against Microsoft Security Response Center (MSRC) data.
+
+When scanning a Windows image or SBOM, the patch (KB) identifier and the Windows version together determine which CVEs apply.
+
+  </Accordion>
+</AccordionGroup>
+
+## Configuration reference
+
+The following `match` configuration options apply to OS package matchers. All options can be set in `~/.grype.yaml`:
+
+<CodeGroup>
+
+```yaml dpkg (Debian/Ubuntu)
+match:
+  dpkg:
+    # Epoch handling strategy: zero | auto
+    missing-epoch-strategy: zero
+    # Fall back to CPE matching for packages from EOL distros
+    use-cpes-for-eol: false
+```
+
+```yaml rpm (Red Hat family)
+match:
+  rpm:
+    # Epoch handling strategy: zero | auto
+    missing-epoch-strategy: auto
+    # Fall back to CPE matching for packages from EOL distros
+    use-cpes-for-eol: false
+```
+
+```yaml fix-channel (Red Hat EUS)
+fix-channel:
+  redhat-eus:
+    # auto | always | never
+    apply: auto
+    versions: ">= 8"
+```
+
+</CodeGroup>
+
+<Tip>
+Set `GRYPE_MATCH_RPM_MISSING_EPOCH_STRATEGY=auto` (or the equivalent `dpkg` variable) as an environment variable to override without modifying your config file. Grype maps dotted YAML keys to environment variables using underscores and the `GRYPE_` prefix.
+</Tip>

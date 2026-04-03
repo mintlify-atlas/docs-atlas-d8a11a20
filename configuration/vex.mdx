@@ -1,0 +1,159 @@
+---
+title: "VEX support"
+description: "Apply VEX documents to filter or augment Grype scan results based on vendor exploitability statements."
+---
+
+VEX (Vulnerability Exploitability eXchange) is a standard for communicating whether a product is actually affected by a vulnerability, even when that vulnerability exists in a dependency it ships. A VEX document lets a vendor or maintainer say "yes, this package contains the vulnerable code, but our product is not exploitable" — and Grype can apply that context automatically.
+
+## Supported formats
+
+Grype supports two VEX formats:
+
+- **OpenVEX** — A JSON-LD format defined by the OpenVEX specification. Grype detects this format automatically.
+- **CSAF** — The Common Security Advisory Framework format, produced by many vendors and security teams.
+
+Grype selects the parser based on the content of the first document you provide.
+
+## Applying VEX documents
+
+Pass one or more VEX document paths using the `--vex` flag:
+
+```bash
+grype myimage:latest --vex ./vex.json
+```
+
+Or set them in your config file:
+
+```yaml
+vex-documents:
+  - ./vex.json
+  - /path/to/vendor-advisory.csaf
+```
+
+When VEX documents are loaded, Grype filters out matches where the product is marked as `not_affected` or `fixed`, and moves them to the ignored matches list.
+
+## VEX statuses
+
+VEX documents use four statuses to describe the exploitability of a vulnerability in a given product:
+
+| Status | Meaning |
+|---|---|
+| `not_affected` | The product is not affected by this vulnerability |
+| `fixed` | The vulnerability has been fixed in this version |
+| `affected` | The product is confirmed to be affected |
+| `under_investigation` | The vendor is still assessing the impact |
+
+By default, Grype automatically suppresses matches where the VEX status is `not_affected` or `fixed`.
+
+## Configuring which statuses to ignore
+
+Use `--vex-add` to extend which VEX statuses cause Grype to suppress a match:
+
+```bash
+# Also suppress matches that are still under investigation
+grype myimage:latest --vex ./vex.json --vex-add under_investigation
+```
+
+Or in your config file:
+
+```yaml
+vex-documents:
+  - ./vex.json
+
+vex-add:
+  - not_affected
+  - fixed
+  - under_investigation
+```
+
+<Note>
+`affected` and `under_investigation` are not suppressed by default. Adding them to `vex-add` makes Grype restore matches from the ignored list if a VEX document marks them as affected.
+</Note>
+
+## VEX justifications
+
+For `not_affected` statements, a VEX document can include a justification that explains why the product is not affected. You can use these in [ignore rules](/configuration/ignore-rules) to be more selective about which `not_affected` statements to honor.
+
+| Justification | Meaning |
+|---|---|
+| `component_not_present` | The vulnerable component is not included in the product |
+| `vulnerable_code_not_in_execute_path` | The vulnerable code exists but is never reached at runtime |
+| `vulnerable_code_not_present` | The vulnerable code path is compiled out or otherwise absent |
+| `vulnerable_code_cannot_be_controlled_by_adversary` | An adversary cannot reach or influence the vulnerable code |
+| `inline_mitigations_already_exist` | The product already includes mitigations for this vulnerability |
+
+### Filter by justification using ignore rules
+
+```yaml
+ignore:
+  # Only suppress not_affected when the code is confirmed absent
+  - vex-status: not_affected
+    vex-justification: vulnerable_code_not_present
+```
+
+## Creating an OpenVEX document
+
+The following is a minimal OpenVEX document that marks a specific CVE as `not_affected` for a container image:
+
+```json
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/2024-001",
+  "author": "Example Corp <security@example.com>",
+  "timestamp": "2024-01-15T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2021-44228"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/myapp@sha256:abc123",
+          "subcomponents": [
+            { "@id": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1" }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The JNDI lookup feature is disabled at compile time in our build."
+    }
+  ]
+}
+```
+
+Apply it to a scan:
+
+```bash
+grype myimage:latest --vex ./log4shell-vex.json
+```
+
+## How VEX interacts with ignore rules
+
+VEX processing happens after Grype's standard ignore rules are applied. The interaction works as follows:
+
+1. Grype runs matching and produces results.
+2. Standard [ignore rules](/configuration/ignore-rules) are applied, moving suppressed matches to the ignored list.
+3. VEX documents are read and applied. Matches where the VEX status is in the ignore list (`not_affected`, `fixed` by default) are moved to ignored.
+4. If `vex-add` includes `affected` or `under_investigation`, Grype also checks the ignored list and restores matches where the VEX document says the product is affected.
+
+You can combine VEX-based filtering with standard ignore rules in the same config:
+
+```yaml
+vex-documents:
+  - ./vendor-vex.json
+
+# Also suppress wont-fix vulns via standard ignore rules
+ignore:
+  - fix-state: wont-fix
+
+# Trust vendor's not_affected statements automatically
+vex-add:
+  - not_affected
+  - fixed
+```
+
+<Tip>
+Use `--show-suppressed` to see which matches were filtered by VEX documents and which ignore rules caused each suppression.
+</Tip>

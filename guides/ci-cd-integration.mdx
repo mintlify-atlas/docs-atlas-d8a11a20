@@ -1,0 +1,225 @@
+---
+title: "CI/CD integration"
+description: "Run Grype in continuous integration pipelines to catch vulnerabilities before they reach production."
+---
+
+Grype integrates naturally into any CI/CD pipeline. You can control exit codes based on severity, save artifacts for later review, and cache the vulnerability database to keep builds fast.
+
+## Exit codes
+
+Grype uses three distinct exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Scan completed, no vulnerabilities at or above the threshold |
+| `1`  | Tool error (scan could not complete) |
+| `2`  | Vulnerabilities found at or above the `--fail-on` threshold |
+
+Use `--fail-on` to set the severity threshold. Grype exits with code `2` when any match reaches that level or higher.
+
+```bash
+# Fail the build on any critical vulnerability
+grype myimage:latest --fail-on critical
+
+# Fail on high or critical
+grype myimage:latest --fail-on high
+```
+
+Valid severity values: `negligible`, `low`, `medium`, `high`, `critical`.
+
+<Note>
+If you omit `--fail-on`, Grype always exits `0` after a successful scan regardless of what it finds. Set a threshold explicitly in every CI job.
+</Note>
+
+## Saving scan artifacts
+
+Save results to a file for archiving, auditing, or downstream processing.
+
+```bash
+# Save JSON results
+grype myimage:latest --output json --file results.json
+
+# Save SARIF for upload to code scanning dashboards
+grype myimage:latest --output sarif --file results.sarif
+
+# Save multiple formats at once
+grype myimage:latest \
+  --output json --file results.json \
+  --output sarif --file results.sarif
+```
+
+## Only fail on fixable vulnerabilities
+
+Use `--only-fixed` to skip vulnerabilities that have no available fix. This is useful when you want actionable failures only.
+
+```bash
+grype myimage:latest --fail-on high --only-fixed
+```
+
+## Caching the vulnerability database
+
+The Grype database is downloaded on first run and updated periodically. Cache it between CI runs to avoid repeated downloads.
+
+The default cache location is `~/.cache/grype/db/`. Override it with the `GRYPE_DB_CACHE_DIR` environment variable.
+
+<Tip>
+Cache the entire `~/.cache/grype/db/` directory. The database is versioned by checksum, so stale cache entries are automatically ignored.
+</Tip>
+
+## CI platform examples
+
+<Tabs>
+  <Tab title="GitHub Actions">
+    See the [GitHub Actions guide](/guides/github-actions) for a complete workflow including SARIF upload and cache configuration.
+  </Tab>
+  <Tab title="GitLab CI">
+    ```yaml
+    # .gitlab-ci.yml
+    variables:
+      GRYPE_DB_CACHE_DIR: "$CI_PROJECT_DIR/.grype-db-cache"
+
+    vulnerability-scan:
+      image: anchore/grype:latest
+      stage: test
+      cache:
+        key: grype-db
+        paths:
+          - .grype-db-cache/
+      script:
+        - grype "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+            --fail-on high
+            --only-fixed
+            --output json
+            --file gl-container-scanning-report.json
+      artifacts:
+        reports:
+          container_scanning: gl-container-scanning-report.json
+        when: always
+    ```
+  </Tab>
+  <Tab title="CircleCI">
+    ```yaml
+    # .circleci/config.yml
+    version: 2.1
+
+    jobs:
+      vulnerability-scan:
+        docker:
+          - image: cimg/base:current
+        steps:
+          - checkout
+          - restore_cache:
+              keys:
+                - grype-db-v1-{{ checksum "~/.cache/grype/db/metadata.json" }}
+                - grype-db-v1-
+          - run:
+              name: Install Grype
+              command: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          - run:
+              name: Scan image
+              command: |
+                grype myimage:latest \
+                  --fail-on high \
+                  --only-fixed \
+                  --output sarif \
+                  --file results.sarif
+          - save_cache:
+              key: grype-db-v1-{{ epoch }}
+              paths:
+                - ~/.cache/grype/db/
+          - store_artifacts:
+              path: results.sarif
+    ```
+  </Tab>
+  <Tab title="Jenkins">
+    ```groovy
+    // Jenkinsfile
+    pipeline {
+        agent any
+        environment {
+            GRYPE_DB_CACHE_DIR = "${WORKSPACE}/.grype-db-cache"
+        }
+        stages {
+            stage('Vulnerability Scan') {
+                steps {
+                    sh '''
+                        # Install Grype if not present
+                        if ! command -v grype &> /dev/null; then
+                            curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+                                | sh -s -- -b /usr/local/bin
+                        fi
+
+                        grype ${IMAGE_NAME}:${IMAGE_TAG} \
+                            --fail-on high \
+                            --only-fixed \
+                            --output json \
+                            --file results.json \
+                            --output sarif \
+                            --file results.sarif
+                    '''
+                }
+                post {
+                    always {
+                        archiveArtifacts artifacts: 'results.*', allowEmptyArchive: true
+                    }
+                }
+            }
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Shell script">
+    ```bash
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    IMAGE="${1:?Usage: scan.sh IMAGE[:TAG]}"
+    FAIL_ON="${GRYPE_FAIL_ON:-high}"
+    OUTPUT_DIR="${GRYPE_OUTPUT_DIR:-./scan-results}"
+
+    mkdir -p "$OUTPUT_DIR"
+
+    echo "Scanning $IMAGE for vulnerabilities at or above $FAIL_ON..."
+    grype "$IMAGE" \
+      --fail-on "$FAIL_ON" \
+      --only-fixed \
+      --output json  --file "$OUTPUT_DIR/results.json" \
+      --output sarif --file "$OUTPUT_DIR/results.sarif"
+
+    EXIT_CODE=$?
+    if [ "$EXIT_CODE" -eq 2 ]; then
+      echo "Vulnerabilities found. Review $OUTPUT_DIR/results.json"
+      exit 2
+    fi
+    echo "Scan passed."
+    ```
+  </Tab>
+</Tabs>
+
+## Using Docker in CI
+
+If you cannot install Grype directly, run it as a Docker container. Mount the Docker socket to scan locally built images, or pass the image reference directly for registry images.
+
+```bash
+# Scan a registry image
+docker run --rm \
+  -v ~/.cache/grype:/root/.cache/grype \
+  anchore/grype:latest \
+  myimage:latest --fail-on high
+
+# Scan a locally built image (requires Docker socket)
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.cache/grype:/root/.cache/grype \
+  anchore/grype:latest \
+  myimage:latest --fail-on high
+```
+
+## Best practices
+
+- **Set `--fail-on` explicitly.** A scan that never fails provides no protection.
+- **Use `--only-fixed`** to avoid failing builds on vulnerabilities that have no upstream fix yet. Balance this with periodic reviews of unfixed findings.
+- **Save artifacts on every run**, including passing ones. Trending data over time is valuable.
+- **Cache the database.** Even a one-day-old cache is better than downloading on every build.
+- **Use ignore rules for accepted risks.** Rather than lowering the severity threshold globally, [configure ignore rules](/configuration/ignore-rules) for specific CVEs you have assessed and accepted.
+- **Separate scan stages from build stages.** Run the vulnerability scan after the image is built so you scan what will actually be deployed.

@@ -1,0 +1,161 @@
+---
+title: "GitHub Actions integration"
+description: "Scan container images for vulnerabilities in GitHub Actions, upload results to the Security tab, and cache the Grype database."
+---
+
+GitHub Actions is the most common place teams run Grype. You can use the official Anchore scan action (which wraps Grype) or invoke Grype directly in a workflow step.
+
+## Complete workflow
+
+The example below builds a Docker image, scans it with Grype, uploads SARIF results to the GitHub Security tab, and caches the vulnerability database.
+
+```yaml
+# .github/workflows/vulnerability-scan.yml
+name: Vulnerability scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    name: Grype vulnerability scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # required for uploading SARIF
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t localbuild/myimage:latest .
+
+      - name: Cache Grype database
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ hashFiles('**/grype.yaml') }}-${{ github.run_id }}
+          restore-keys: |
+            grype-db-${{ runner.os }}-
+
+      - name: Scan image with Grype
+        uses: anchore/scan-action@v6
+        id: scan
+        with:
+          image: localbuild/myimage:latest
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # upload even when the scan step fails
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+```
+
+<Note>
+The `security-events: write` permission is required to upload SARIF results to the GitHub Security tab. Without it, the upload step will fail.
+</Note>
+
+## Using `anchore/scan-action`
+
+The [anchore/scan-action](https://github.com/anchore/scan-action) wraps Grype and handles installation automatically. Key inputs:
+
+| Input | Description |
+|-------|-------------|
+| `image` | Image reference to scan (e.g. `myimage:latest`) |
+| `path` | Directory path to scan instead of an image |
+| `fail-build` | Set to `true` to fail the job when vulnerabilities are found |
+| `severity-cutoff` | Minimum severity to trigger failure: `negligible`, `low`, `medium`, `high`, `critical` |
+| `only-fixed` | Set to `true` to ignore vulnerabilities with no available fix |
+| `output-format` | Output format: `sarif`, `json`, `table` |
+| `grype-version` | Pin a specific Grype version (optional) |
+
+The action outputs:
+- `sarif` — path to the generated SARIF file
+- `json` — path to the generated JSON file
+
+## Running Grype directly
+
+If you prefer full control over the Grype invocation, install and run Grype as a shell step.
+
+```yaml
+steps:
+  - name: Install Grype
+    run: |
+      curl -sSfL https://get.anchore.io/grype | sh -s -- -b /usr/local/bin
+
+  - name: Scan image
+    run: |
+      grype myimage:latest \
+        --fail-on high \
+        --only-fixed \
+        --output sarif --file results.sarif \
+        --output json  --file results.json
+
+  - name: Upload SARIF
+    uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: results.sarif
+
+  - name: Upload JSON artifact
+    uses: actions/upload-artifact@v4
+    if: always()
+    with:
+      name: grype-results
+      path: results.json
+```
+
+## Caching the vulnerability database
+
+The Grype database is typically 50–100 MB and is updated daily. Cache it between workflow runs to avoid repeated downloads.
+
+```yaml
+- name: Cache Grype database
+  uses: actions/cache@v4
+  with:
+    path: ~/.cache/grype/db
+    key: grype-db-${{ runner.os }}-${{ github.run_id }}
+    restore-keys: |
+      grype-db-${{ runner.os }}-
+```
+
+<Tip>
+Use a broad `restore-keys` prefix so the cache is reused even when the exact key misses. Grype will automatically update a stale cached database if it is more than 5 days old.
+</Tip>
+
+If you have set `GRYPE_DB_CACHE_DIR` to a custom path, use that same path in the `actions/cache` step.
+
+## Viewing results in the Security tab
+
+When you upload a SARIF file with `github/codeql-action/upload-sarif`, GitHub displays the findings in **Security → Code scanning alerts**. Each alert includes the CVE ID, severity, affected package, and a link to the advisory.
+
+<Note>
+Code scanning alerts are available on public repositories and on private repositories with GitHub Advanced Security enabled.
+</Note>
+
+## Scanning on pull requests
+
+The workflow above triggers on both `push` and `pull_request`. For pull request scans, GitHub will annotate the diff with any new findings introduced by the change.
+
+To scan only on pull requests targeting `main`:
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+```
+
+## Best practices
+
+- Always set `if: always()` on SARIF upload steps so results are uploaded even when the scan fails the build.
+- Pin `anchore/scan-action` to a specific version tag (e.g. `@v6`) rather than `@main` for reproducible builds.
+- Store the JSON artifact alongside the SARIF file so you have the full structured output for audit purposes.
+- Use `only-fixed: true` on PR checks to avoid blocking merges on vulnerabilities with no available fix, while still collecting full data in JSON artifacts.
+- Review suppressed findings periodically. The `--show-suppressed` flag includes ignored matches in the output.

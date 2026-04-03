@@ -1,0 +1,244 @@
+---
+title: "Output formats"
+description: "Configure Grype's output format with -o. Choose from table, JSON, CycloneDX, SARIF, or a custom Go template."
+keywords: ["grype", "output", "json", "sarif", "cyclonedx", "table", "template", "format"]
+---
+
+Use the `-o` flag to select an output format. You can specify `-o` more than once to write multiple formats in a single run.
+
+## Available formats
+
+| Format | Flag value | Description |
+|--------|-----------|-------------|
+| Table | `table` | Human-readable ASCII table (default) |
+| JSON | `json` | Machine-readable JSON with full match details |
+| CycloneDX XML | `cyclonedx` | CycloneDX BOM with vulnerability data (XML) |
+| CycloneDX JSON | `cyclonedx-json` | CycloneDX BOM with vulnerability data (JSON) |
+| SARIF | `sarif` | Static Analysis Results Interchange Format |
+| Template | `template` | Custom output rendered from a Go template |
+
+<Note>
+  `embedded-cyclonedx-vex-json` and `embedded-cyclonedx-vex-xml` are deprecated aliases for `cyclonedx-json` and `cyclonedx` respectively. They will be removed in v1.0.
+</Note>
+
+## Table (default)
+
+The table format is the default when `-o` is not specified. It prints a human-readable summary to stdout:
+
+```bash
+grype nginx:latest
+```
+
+```text
+NAME              INSTALLED  FIXED IN  TYPE  VULNERABILITY   SEVERITY  EPSS           RISK
+libssl3           3.0.13     3.0.14    deb   CVE-2024-0727   Low       < 0.1% (20th)   3.0
+openssl           3.0.13     3.0.14    deb   CVE-2024-0727   Low       < 0.1% (20th)   3.0
+```
+
+Use `--show-suppressed` to include matches that were ignored by an ignore rule or VEX document:
+
+```bash
+grype nginx:latest --show-suppressed
+```
+
+## JSON
+
+The JSON format includes the full match details, vulnerability metadata, EPSS scores, KEV data, and fix information:
+
+```bash
+grype nginx:latest -o json
+```
+
+Use `--pretty` to pretty-print the JSON output:
+
+```bash
+grype nginx:latest -o json --pretty
+```
+
+Example output (abbreviated):
+
+```json
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0727",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2024-0727",
+        "namespace": "debian:distro:debian:12",
+        "severity": "Low",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0727"],
+        "description": "...",
+        "cvss": [...],
+        "epss": [
+          {
+            "cve": "CVE-2024-0727",
+            "epss": 0.00044,
+            "percentile": 0.20,
+            "date": "2024-08-01"
+          }
+        ],
+        "fix": {
+          "versions": ["3.0.14"],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "libssl3",
+        "version": "3.0.13",
+        "type": "deb",
+        "purl": "pkg:deb/debian/libssl3@3.0.13?distro=debian-12"
+      },
+      "matchDetails": [...]
+    }
+  ],
+  "source": {
+    "type": "image",
+    "target": {
+      "userInput": "nginx:latest",
+      "imageID": "sha256:...",
+      "manifestDigest": "sha256:..."
+    }
+  },
+  "distro": {
+    "name": "debian",
+    "version": "12"
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.x.x",
+    "timestamp": "2024-08-01T12:00:00Z"
+  }
+}
+```
+
+## CycloneDX
+
+Produce a CycloneDX BOM with embedded vulnerability data:
+
+<CodeGroup>
+
+```bash CycloneDX XML
+grype nginx:latest -o cyclonedx
+```
+
+```bash CycloneDX JSON
+grype nginx:latest -o cyclonedx-json
+```
+
+</CodeGroup>
+
+CycloneDX output is suitable for supply chain tooling and vulnerability management platforms that consume BOMs.
+
+## SARIF
+
+SARIF (Static Analysis Results Interchange Format) is accepted by GitHub code scanning, Azure DevOps, and other CI/CD platforms:
+
+```bash
+grype nginx:latest -o sarif
+```
+
+To upload results to GitHub Advanced Security, write the SARIF to a file:
+
+```bash
+grype nginx:latest -o sarif --file results.sarif
+```
+
+Then reference `results.sarif` in your GitHub Actions workflow with `github/codeql-action/upload-sarif`.
+
+## Template
+
+The template format renders output using a Go template file. Use it to produce any text-based format (CSV, HTML, Markdown, JUnit XML, and so on).
+
+Specify a template file with `-t`:
+
+```bash
+grype nginx:latest -o template -t ./my-template.tmpl
+```
+
+### Template data model
+
+Templates receive a `Document` object with the following top-level fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `.Matches` | `[]Match` | All vulnerability matches |
+| `.IgnoredMatches` | `[]IgnoredMatch` | Matches suppressed by ignore rules |
+| `.Source` | `Source` | The scanned target |
+| `.Distro` | `Distribution` | Detected OS distribution |
+| `.Descriptor` | `Descriptor` | Grype version, config, and timestamp |
+
+Each match in `.Matches` exposes:
+
+| Field | Description |
+|-------|-------------|
+| `.Vulnerability.ID` | Vulnerability identifier (e.g. `CVE-2024-0727`) |
+| `.Vulnerability.Severity` | Severity string (`Critical`, `High`, `Medium`, `Low`, `Negligible`, `Unknown`) |
+| `.Vulnerability.Fix.State` | Fix state (`fixed`, `not-fixed`, `wont-fix`, `unknown`) |
+| `.Vulnerability.Fix.Versions` | List of versions that fix the vulnerability |
+| `.Vulnerability.EPSS` | EPSS score data |
+| `.Vulnerability.Description` | Vulnerability description |
+| `.Artifact.Name` | Package name |
+| `.Artifact.Version` | Installed version |
+| `.Artifact.Type` | Package type (e.g. `deb`, `rpm`, `npm`) |
+| `.Artifact.PURL` | Package URL |
+
+### Example templates
+
+The [Grype repository](https://github.com/anchore/grype/tree/main/templates) includes example templates for common formats.
+
+<CodeGroup>
+
+```go-text-template csv.tmpl
+"Package","Version Installed","Vulnerability ID","Severity"
+{{- range .Matches}}
+"{{.Artifact.Name}}","{{.Artifact.Version}}","{{.Vulnerability.ID}}","{{.Vulnerability.Severity}}"
+{{- end}}
+```
+
+```go-text-template markdown.tmpl
+# Vulnerability Report
+
+- Name: {{- if eq (.Source.Type) "image" }} {{ .Source.Target.UserInput }}{{ end }}
+- Date: {{ .Descriptor.Timestamp }}
+
+| Package | Version Installed | Vulnerability ID | Severity |
+|---------|-------------------|------------------|----------|
+{{- range .Matches }}
+| {{ .Artifact.Name }} | {{ .Artifact.Version }} | {{ .Vulnerability.ID }} | {{ .Vulnerability.Severity }} |
+{{- end }}
+```
+
+</CodeGroup>
+
+Use the CSV template:
+
+```bash
+grype nginx:latest -o template -t ./templates/csv.tmpl
+```
+
+## Writing output to a file
+
+Use `--file` to write the report to a file instead of stdout:
+
+```bash
+grype nginx:latest -o json --file report.json
+```
+
+## Multiple outputs
+
+Pass `-o` more than once to produce multiple formats in a single scan:
+
+```bash
+grype nginx:latest -o table -o json --file report.json
+```
+
+This writes the table to stdout and the JSON to `report.json`.
+
+You can combine any supported formats:
+
+```bash
+grype nginx:latest \
+  -o sarif --file results.sarif \
+  -o cyclonedx-json --file sbom.cdx.json \
+  -o table
+```

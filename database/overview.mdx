@@ -1,0 +1,178 @@
+---
+title: "Vulnerability Database"
+description: "How Grype's local vulnerability database works, where it lives, and how to configure it."
+---
+
+Grype scans against a local SQLite database that it downloads from Anchore's CDN. The database aggregates vulnerability data from multiple upstream sources and is refreshed periodically so your scans always reflect the latest known vulnerabilities.
+
+## How it works
+
+On the first run, Grype automatically downloads the database before performing a scan. On subsequent runs, it checks whether the database is fresh enough to use. If the database is older than the configured maximum age, Grype downloads a new copy before scanning.
+
+The full lifecycle looks like this:
+
+1. Grype checks whether a local database exists.
+2. If a database exists, its age is compared against `db.max-allowed-built-age` (default: 5 days).
+3. If the database is stale or missing, Grype fetches the latest metadata from `db.update-url` and downloads a new archive.
+4. The archive is verified by checksum, extracted, and hydrated (indexes are built).
+5. The new database replaces the old one atomically.
+
+Auto-update behaviour is controlled by the `db.auto-update` setting. When disabled, Grype uses whatever database is already on disk without contacting the update server.
+
+## Database schema
+
+The current schema is **v6** (model version 6, revision 1, addition 4 at the time of writing). The schema version is embedded in the database itself and is also reported by `grype db status`. Grype will refuse to use a database whose model version does not match the version the binary was built for.
+
+The v6 schema stores:
+
+| Table area | Description |
+|---|---|
+| `vulnerability_handles` | Core advisory records, one per vulnerability per provider |
+| `affected_package_handles` | Packages affected by a vulnerability, keyed by ecosystem and OS |
+| `unaffected_package_handles` | Packages explicitly marked as not affected |
+| `affected_cpe_handles` / `unaffected_cpe_handles` | CPE-based affected/unaffected records |
+| `operating_systems` | OS names and version details used to scope package matches |
+| `providers` | Upstream data sources that populated the database |
+| `known_exploited_vulnerability_handles` | CISA KEV data |
+| `epss_handles` | EPSS probability scores |
+| `cwe_handles` | CWE associations |
+
+## Data sources
+
+The database is populated from several upstream vulnerability feeds, each managed by a separate provider (powered by [Vunnel](https://github.com/anchore/vunnel)):
+
+- **NVD** — NIST National Vulnerability Database (CVE records)
+- **GitHub Advisory Database (GHSA)** — language ecosystem advisories
+- **Ubuntu Security Notices**
+- **Debian Security Tracker**
+- **Alpine SecDB**
+- **RHEL / CentOS advisories** (RHSA, ELSA)
+- **Amazon Linux Security Center** (ALAS)
+- **Oracle Linux Errata** (ELSA)
+- **SUSE / openSUSE advisories**
+- **Wolfi / Chainguard advisories**
+- **MSRC** (Microsoft Security Response Center)
+
+Run `grype db providers` to see exactly which providers are present in your locally installed database and when each one last captured data.
+
+## Default storage location
+
+The database is stored under the XDG cache directory:
+
+```
+$XDG_CACHE_HOME/grype/db/<schema-version>/
+```
+
+On most Linux systems this resolves to:
+
+```
+~/.cache/grype/db/6/
+```
+
+On macOS it typically resolves to:
+
+```
+~/Library/Caches/grype/db/6/
+```
+
+The main database file inside that directory is named `vulnerability.db`.
+
+## Offline and air-gapped usage
+
+If your environment cannot reach the internet you can pre-download the database and copy it into place, or distribute it through an internal mirror.
+
+**Option 1 — import a local archive:**
+
+```bash
+grype db import /path/to/grype-db-6.tar.zst
+```
+
+The import command accepts a local archive file, a raw `.db` file, or a URL. If the URL includes a `checksum` query parameter (e.g. `sha256:abc123...`) the archive is verified against that digest before activation.
+
+**Option 2 — disable auto-update:**
+
+```yaml
+# ~/.config/grype/config.yaml
+db:
+  auto-update: false
+```
+
+With auto-update disabled Grype uses the database already on disk and never contacts the update server. Combine this with a scheduled `grype db update` job (or a periodic `grype db import`) to keep the database current.
+
+**Option 3 — custom update URL (enterprise/internal mirror):**
+
+Point Grype at your own database server. The server must expose a `latest.json` file at the expected schema path:
+
+```yaml
+db:
+  update-url: https://db.internal.example.com/grype
+```
+
+Grype appends `/v6/latest.json` to the URL automatically (unless the URL already ends in `.json`).
+
+<Note>
+When deploying across many hosts it is more efficient to host the database archive behind an internal CDN or artifact registry and set `db.update-url` rather than having every host pull from Anchore's CDN.
+</Note>
+
+## Understanding `grype db status`
+
+`grype db status` prints a summary of the currently installed database:
+
+```
+Path:      /home/user/.cache/grype/db/6/vulnerability.db
+Schema:    6.1.4
+Built:     2026-03-28T02:30:00Z
+From:      https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.4_2026-03-28T02:30:00Z.tar.zst
+Status:    valid
+```
+
+| Field | Meaning |
+|---|---|
+| **Path** | Absolute path to the SQLite database file |
+| **Schema** | Model.Revision.Addition version of the installed database |
+| **Built** | Timestamp when the database archive was built |
+| **From** | Source URL or `manual import` for the archive that installed this database |
+| **Status** | `valid` if the database passes age and checksum validation; `invalid` otherwise |
+
+If Status shows `invalid`, the most common fix is to run `grype db update` to replace the database with a fresh copy.
+
+## Configuration reference
+
+All database settings live under the `db` key in Grype's configuration file.
+
+| Option | Default | Description |
+|---|---|---|
+| `db.cache-dir` | `$XDG_CACHE_HOME/grype/db` | Directory where the database is stored |
+| `db.update-url` | `https://grype.anchore.io/databases` | URL of the database listing server |
+| `db.auto-update` | `true` | Check for and download database updates before each scan |
+| `db.validate-age` | `true` | Reject databases older than `max-allowed-built-age` |
+| `db.max-allowed-built-age` | `120h` (5 days) | Maximum age of the database before it is considered stale |
+| `db.validate-by-hash-on-start` | `false` | Re-verify the database checksum on every run |
+| `db.require-update-check` | `false` | Fail the scan if the update server cannot be reached |
+| `db.update-available-timeout` | `30s` | Timeout for downloading the `latest.json` listing file (~156 KiB) |
+| `db.update-download-timeout` | `300s` | Timeout for downloading the full database archive (~156 MB) |
+| `db.max-update-check-frequency` | `2h` | Minimum interval between automatic update checks |
+| `db.ca-cert` | _(none)_ | Path to a PEM certificate to trust when downloading the database |
+
+### Example configuration
+
+```yaml
+db:
+  cache-dir: /data/grype/db
+  update-url: https://db.internal.example.com/grype
+  auto-update: true
+  max-allowed-built-age: 72h
+  update-available-timeout: 30s
+  update-download-timeout: 600s
+  ca-cert: /etc/ssl/certs/internal-ca.pem
+```
+
+### Environment variables
+
+Every configuration option can also be set as an environment variable using the `GRYPE_` prefix with underscores instead of dots:
+
+```bash
+export GRYPE_DB_AUTO_UPDATE=false
+export GRYPE_DB_UPDATE_URL=https://db.internal.example.com/grype
+export GRYPE_DB_MAX_ALLOWED_BUILT_AGE=72h
+```
